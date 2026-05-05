@@ -842,7 +842,7 @@ function pickVal(datas, name) {
 }
 
 async function loadLive() {
-  const r = await api('/api/fox/op/v0/device/real/query', { variables: REAL_VARS });
+  const r = await api('/api/fox/op/v1/device/real/query', { variables: REAL_VARS });
   if (r.errno !== 0) { log('Fox real-time error: ' + (r.msg || JSON.stringify(r)), 'err'); setStatus(false); return; }
   const datas = r.result?.[0]?.datas;
   if (!datas) { log('Unexpected real-time payload: ' + JSON.stringify(r).slice(0, 200), 'err'); return; }
@@ -1274,7 +1274,7 @@ async function projectAt1730() {
     // If no sunset data or already past sunset, skip — no projection needed.
     if (!sunsetToday || d >= sunsetToday) { updateSolarHeadline(); return; }
 
-    const rt = await api('/api/fox/op/v0/device/real/query', { variables: ['SoC', 'soc'] });
+    const rt = await api('/api/fox/op/v1/device/real/query', { variables: ['SoC', 'soc'] });
     const datas = rt.result?.[0]?.datas || [];
     const soc = pickVal(datas, 'SoC') ?? pickVal(datas, 'soc');
     if (soc == null) return;
@@ -1445,27 +1445,55 @@ $('chargeRate').addEventListener('input', (e) => {
 
 function pad2(n) { return String(n).padStart(2, '0'); }
 
-// Shape of a "blank" slot — matches what the Fox firmware itself writes for unused slots.
-const BLANK_SLOT = {
-  enable: 0,
-  startHour: 0, startMinute: 0, endHour: 0, endMinute: 0,
-  workMode: 'SelfUse',
-  fdSoc: 100, fdPwr: 10500,
-  minSocOnGrid: 10, maxSoc: 100,
-};
+// ---------------------------------------------------------------------------
+// Scheduler v3 helpers
+// ---------------------------------------------------------------------------
+// Fox API v3 scheduler wraps power/SoC params in an `extraParam` object and
+// omits the `enable` field from group objects (all returned groups are active).
+// These helpers normalise v3 groups to a flat internal shape and convert back
+// to v3 format when writing.
 
-// A slot is "truly blank" if it's a disabled SelfUse with a zero-length window.
-// We prefer to use these for our force-charge so we don't disturb user-numbered slots.
-function isBlankSlot(g) {
-  return g && g.enable === 0 && g.workMode === 'SelfUse'
-    && g.startHour === 0 && g.startMinute === 0
-    && g.endHour === 0 && g.endMinute === 0;
+/** Normalise a v3 (extraParam) or v1 (flat) group to our internal format. */
+function fromApiGroup(g) {
+  const ep = g.extraParam || {};
+  return {
+    enable      : g.enable ?? 1,          // v3 groups have no enable → always 1
+    startHour   : g.startHour,   startMinute: g.startMinute,
+    endHour     : g.endHour,     endMinute  : g.endMinute,
+    workMode    : g.workMode,
+    isRemainMode: g.isRemainMode || false, // v3 catch-all 00:00-23:59 default period
+    fdSoc       : ep.fdSoc       ?? g.fdSoc       ?? 100,
+    fdPwr       : ep.fdPwr       ?? g.fdPwr       ?? 5000,
+    maxSoc      : ep.maxSoc      ?? g.maxSoc      ?? 100,
+    minSocOnGrid: ep.minSocOnGrid ?? g.minSocOnGrid ?? 10,
+  };
+}
+
+/** Convert our internal flat group back to the v3 API wire format. */
+function toV3Group(g) {
+  const out = {
+    startHour: g.startHour, startMinute: g.startMinute,
+    endHour  : g.endHour,   endMinute  : g.endMinute,
+    workMode : g.workMode,
+  };
+  if (g.isRemainMode) out.isRemainMode = true;
+  out.extraParam = {
+    fdSoc        : g.fdSoc        ?? 100,
+    fdPwr        : g.fdPwr        ?? 5000,
+    maxSoc       : g.maxSoc       ?? 100,
+    minSocOnGrid : g.minSocOnGrid ?? 10,
+  };
+  return out;
 }
 
 async function readScheduler() {
-  const r = await api('/api/fox/op/v1/device/scheduler/get', {});
+  const r = await api('/api/fox/op/v3/device/scheduler/get', {});
   if (r.errno !== 0) throw new Error('scheduler/get: ' + (r.msg || JSON.stringify(r)));
-  return { enable: r.result?.enable ?? 1, groups: (r.result?.groups || []).slice() };
+  return {
+    enable       : r.result?.enable        ?? 1,
+    maxGroupCount: r.result?.maxGroupCount ?? 8,
+    groups       : (r.result?.groups || []).map(fromApiGroup),
+  };
 }
 
 // Auto-stop monitor: polls SoC every 30 s and calls stopForce() when the threshold is crossed.
@@ -1477,7 +1505,7 @@ function startAutoStop(threshold, endDate, mode = 'charge') {
   autoStopTimer = setInterval(async () => {
     if (Date.now() > endDate.getTime()) { clearInterval(autoStopTimer); autoStopTimer = null; return; }
     try {
-      const r = await api('/api/fox/op/v0/device/real/query', { variables: ['SoC', 'soc'] });
+      const r = await api('/api/fox/op/v1/device/real/query', { variables: ['SoC', 'soc'] });
       const soc = pickVal(r.result?.[0]?.datas, 'SoC') ?? pickVal(r.result?.[0]?.datas, 'soc');
       if (soc == null) return;
       const triggered = mode === 'dump' ? soc <= threshold : soc >= threshold;
@@ -1507,8 +1535,9 @@ function isAnyForcedMode(g) {
 }
 
 // Check whether a group's time window contains the given minutes-since-midnight value.
+// isRemainMode groups (00:00-23:59 default) are never treated as an explicit override.
 function groupMatchesNow(g, nowM) {
-  if (!g.enable) return false;
+  if (!g.enable || g.isRemainMode) return false;
   const sM = g.startHour * 60 + g.startMinute;
   const eM = g.endHour * 60 + g.endMinute;
   if (sM === eM) return false;
@@ -1530,13 +1559,14 @@ async function refreshSchedulerPanel() {
     } else {
       $('schedActive').textContent = 'none — running default Self-use';
     }
-    let html = '<thead><tr><th>#</th><th>Mode</th><th>Window</th><th>Rate</th><th>Cut-off</th><th>Max</th><th>En</th></tr></thead><tbody>';
+    let html = '<thead><tr><th>#</th><th>Mode</th><th>Window</th><th>Rate</th><th>Cut-off</th><th>Max</th></tr></thead><tbody>';
     s.groups.forEach((g, i) => {
       const active = groupMatchesNow(g, nowM);
       const cls = active ? 'active' : (g.enable ? 'on' : '');
-      const blank = g.startHour === 0 && g.startMinute === 0 && g.endHour === 0 && g.endMinute === 0;
-      const win = blank ? '—' : `${pad2(g.startHour)}:${pad2(g.startMinute)}–${pad2(g.endHour)}:${pad2(g.endMinute)}`;
-      html += `<tr class="${cls}"><td>${i}</td><td>${g.workMode}</td><td>${win}</td><td>${(g.fdPwr/1000).toFixed(1)}kW</td><td>${g.fdSoc}%</td><td>${g.maxSoc ?? '—'}%</td><td>${g.enable ? '✓' : ''}</td></tr>`;
+      const win = g.isRemainMode
+        ? '00:00–23:59 (default)'
+        : `${pad2(g.startHour)}:${pad2(g.startMinute)}–${pad2(g.endHour)}:${pad2(g.endMinute)}`;
+      html += `<tr class="${cls}"><td>${i}</td><td>${g.workMode}</td><td>${win}</td><td>${(g.fdPwr/1000).toFixed(1)}kW</td><td>${g.fdSoc}%</td><td>${g.maxSoc ?? '—'}%</td></tr>`;
     });
     html += '</tbody>';
     $('schedTable').innerHTML = html;
@@ -1551,76 +1581,60 @@ async function forceChargeNow() {
   const start = new Date();
   const end = new Date(Date.now() + mins * 60000);
 
-  const { groups } = await readScheduler();
+  const { maxGroupCount, groups } = await readScheduler();
 
-  // Clear out any stale force-charge slots from previous attempts so there's exactly
-  // one active window (otherwise the firmware honours whichever starts first, which
-  // may be an old "Charging from Grid: Disabled" slot).
-  let cleared = 0;
-  for (let i = 0; i < groups.length; i++) {
-    if (isAnyForcedMode(groups[i])) { groups[i] = { ...BLANK_SLOT }; cleared++; }
-  }
+  // Remove any stale forced slots first.
+  let filtered = groups.filter((g) => !isAnyForcedMode(g));
+  const cleared = groups.length - filtered.length;
   if (cleared > 0) log(`Cleared ${cleared} stale forced slot(s).`);
 
-  // Pick the highest-index blank slot so low slots stay free for the user.
-  let slotIdx = -1;
-  for (let i = groups.length - 1; i >= 0; i--) {
-    if (isBlankSlot(groups[i])) { slotIdx = i; break; }
-  }
-  if (slotIdx === -1) {
-    log('No free scheduler slot available. Free one in the Fox app (disable + zero a row) then retry.', 'err');
+  // Check capacity (exclude the isRemainMode default which doesn't count as a user slot).
+  const userSlots = filtered.filter((g) => !g.isRemainMode).length;
+  if (userSlots >= maxGroupCount - 1) {
+    log('Scheduler is full. Remove a slot in the Fox app then retry.', 'err');
     return;
   }
 
-  groups[slotIdx] = {
+  // In v3, ForceCharge(BAT) is just ForceCharge; fdSoc = charge-up-to target.
+  filtered.push({
     enable: 1,
     startHour: start.getHours(), startMinute: start.getMinutes(),
     endHour: end.getHours(), endMinute: end.getMinutes(),
-    workMode: 'ForceCharge(BAT)',
-    // In ForceCharge mode, fdSoc is "Charging Cut-off SOC" (the target — charge UP TO this).
-    // maxSoc is the ceiling. fdPwr is the charge power.
+    workMode: 'ForceCharge',
     fdSoc: targetSoc, fdPwr: rateW,
-    minSocOnGrid: 10,
-    maxSoc: targetSoc,
-  };
+    minSocOnGrid: 10, maxSoc: targetSoc,
+  });
 
-  log(`Force charge → slot ${slotIdx}, ${pad2(start.getHours())}:${pad2(start.getMinutes())} → ${pad2(end.getHours())}:${pad2(end.getMinutes())} to ${targetSoc}% @ ${rateKw.toFixed(1)}kW …`);
-  const r = await api('/api/fox/op/v1/device/scheduler/enable', { enable: 1, groups });
+  log(`Force charge → ${pad2(start.getHours())}:${pad2(start.getMinutes())} → ${pad2(end.getHours())}:${pad2(end.getMinutes())} to ${targetSoc}% @ ${rateKw.toFixed(1)}kW …`);
+  const r = await api('/api/fox/op/v3/device/scheduler/enable', { groups: filtered.map(toV3Group), isDefault: false });
   if (r.errno !== 0) { log(`scheduler/enable failed: ${r.msg || JSON.stringify(r)}`, 'err'); return; }
 
   await new Promise((res) => setTimeout(res, 1500));
   const verify = await readScheduler();
-  // Firmware auto-sorts groups (by startHour), so our write may have landed in a
-  // different slot. Verify by content: find any enabled ForceCharge matching our window.
-  const foundIdx = verify.groups.findIndex((g) =>
-    isAnyForceCharge(g) && g.enable === 1
+  // Firmware may re-sort groups; verify by content rather than slot index.
+  const found = verify.groups.find((g) =>
+    isAnyForceCharge(g)
     && g.startHour === start.getHours() && g.startMinute === start.getMinutes()
     && g.endHour === end.getHours() && g.endMinute === end.getMinutes()
   );
-  if (foundIdx >= 0) {
-    const g = verify.groups[foundIdx];
-    log(`Force charge active for ${mins} min ✓ (slot ${foundIdx}, mode=${g.workMode}, rate=${(g.fdPwr/1000).toFixed(1)}kW, cut-off ${g.fdSoc}%)`, 'ok');
+  if (found) {
+    log(`Force charge active for ${mins} min ✓ (mode=${found.workMode}, rate=${(found.fdPwr/1000).toFixed(1)}kW, cut-off ${found.fdSoc}%)`, 'ok');
     startAutoStop(targetSoc, end);
-    log(`Auto-stop armed: will clear slot when SoC hits ${targetSoc}% or at ${pad2(end.getHours())}:${pad2(end.getMinutes())}.`);
+    log(`Auto-stop armed: will clear when SoC hits ${targetSoc}% or at ${pad2(end.getHours())}:${pad2(end.getMinutes())}.`);
   } else {
-    log(`Write reported OK but no enabled ForceCharge slot matches our window — firmware rejected. Click Diagnose.`, 'err');
+    log(`Write reported OK but no ForceCharge slot matches our window — firmware rejected. Click Diagnose.`, 'err');
   }
   setTimeout(loadLive, 3000);
 }
 
 async function stopForce() {
   cancelAutoStop();
-  // Clear any forced-mode slots (charge or discharge); leave every other slot exactly as it was.
-  const { enable, groups } = await readScheduler();
-  let cleared = 0;
-  for (let i = 0; i < groups.length; i++) {
-    if (isAnyForcedMode(groups[i])) {
-      groups[i] = { ...BLANK_SLOT };
-      cleared++;
-    }
-  }
+  // Remove any forced-mode slots; leave every other slot (including isRemainMode) as-is.
+  const { groups } = await readScheduler();
+  const filtered = groups.filter((g) => !isAnyForcedMode(g));
+  const cleared = groups.length - filtered.length;
   if (cleared === 0) { log('No active forced slot to clear.', 'ok'); return; }
-  const r = await api('/api/fox/op/v1/device/scheduler/enable', { enable, groups });
+  const r = await api('/api/fox/op/v3/device/scheduler/enable', { groups: filtered.map(toV3Group), isDefault: false });
   if (r.errno === 0) log(`Cleared ${cleared} forced slot(s); other slots untouched ✓`, 'ok');
   else log('stop failed: ' + (r.msg || JSON.stringify(r)), 'err');
 }
@@ -1633,53 +1647,46 @@ async function forceDumpNow() {
   const start = new Date();
   const end = new Date(Date.now() + mins * 60000);
 
-  const { groups } = await readScheduler();
+  const { maxGroupCount, groups } = await readScheduler();
 
-  // Clear any stale forced slots first.
-  let cleared = 0;
-  for (let i = 0; i < groups.length; i++) {
-    if (isAnyForcedMode(groups[i])) { groups[i] = { ...BLANK_SLOT }; cleared++; }
-  }
+  // Remove stale forced slots first.
+  let filtered = groups.filter((g) => !isAnyForcedMode(g));
+  const cleared = groups.length - filtered.length;
   if (cleared > 0) log(`Cleared ${cleared} stale forced slot(s).`);
 
-  let slotIdx = -1;
-  for (let i = groups.length - 1; i >= 0; i--) {
-    if (isBlankSlot(groups[i])) { slotIdx = i; break; }
-  }
-  if (slotIdx === -1) {
-    log('No free scheduler slot available. Free one in the Fox app then retry.', 'err');
+  const userSlots = filtered.filter((g) => !g.isRemainMode).length;
+  if (userSlots >= maxGroupCount - 1) {
+    log('Scheduler is full. Remove a slot in the Fox app then retry.', 'err');
     return;
   }
 
-  groups[slotIdx] = {
+  // fdSoc = discharge cut-off (stop when battery reaches reserve floor).
+  filtered.push({
     enable: 1,
     startHour: start.getHours(), startMinute: start.getMinutes(),
     endHour: end.getHours(), endMinute: end.getMinutes(),
     workMode: 'ForceDischarge',
-    // fdSoc = discharge cut-off (stop when battery hits this level)
     fdSoc: reserveSoc, fdPwr: rateW,
-    minSocOnGrid: reserveSoc,
-    maxSoc: 100,
-  };
+    minSocOnGrid: reserveSoc, maxSoc: 100,
+  });
 
-  log(`Dump to grid → slot ${slotIdx}, ${pad2(start.getHours())}:${pad2(start.getMinutes())} → ${pad2(end.getHours())}:${pad2(end.getMinutes())} to ${reserveSoc}% floor @ ${rateKw.toFixed(1)}kW …`);
-  const r = await api('/api/fox/op/v1/device/scheduler/enable', { enable: 1, groups });
+  log(`Dump to grid → ${pad2(start.getHours())}:${pad2(start.getMinutes())} → ${pad2(end.getHours())}:${pad2(end.getMinutes())} to ${reserveSoc}% floor @ ${rateKw.toFixed(1)}kW …`);
+  const r = await api('/api/fox/op/v3/device/scheduler/enable', { groups: filtered.map(toV3Group), isDefault: false });
   if (r.errno !== 0) { log(`scheduler/enable failed: ${r.msg || JSON.stringify(r)}`, 'err'); return; }
 
   await new Promise((res) => setTimeout(res, 1500));
   const verify = await readScheduler();
-  const foundIdx = verify.groups.findIndex((g) =>
-    isAnyForceDischarge(g) && g.enable === 1
+  const found = verify.groups.find((g) =>
+    isAnyForceDischarge(g)
     && g.startHour === start.getHours() && g.startMinute === start.getMinutes()
     && g.endHour === end.getHours() && g.endMinute === end.getMinutes()
   );
-  if (foundIdx >= 0) {
-    const g = verify.groups[foundIdx];
-    log(`Dump to grid active for ${mins} min ✓ (slot ${foundIdx}, rate=${(g.fdPwr/1000).toFixed(1)}kW, floor ${g.fdSoc}%)`, 'ok');
+  if (found) {
+    log(`Dump to grid active for ${mins} min ✓ (rate=${(found.fdPwr/1000).toFixed(1)}kW, floor ${found.fdSoc}%)`, 'ok');
     startAutoStop(reserveSoc, end, 'dump');
-    log(`Auto-stop armed: will clear slot when SoC hits ${reserveSoc}% or at ${pad2(end.getHours())}:${pad2(end.getMinutes())}.`);
+    log(`Auto-stop armed: will clear when SoC hits ${reserveSoc}% or at ${pad2(end.getHours())}:${pad2(end.getMinutes())}.`);
   } else {
-    log(`Write reported OK but no enabled ForceDischarge slot found — firmware may have rejected. Click Diagnose.`, 'err');
+    log(`Write reported OK but no ForceDischarge slot found — firmware may have rejected. Click Diagnose.`, 'err');
   }
   setTimeout(loadLive, 3000);
 }
@@ -1697,6 +1704,7 @@ async function diagnose() {
 
   // 1. Full scheduler state, no truncation — we need exact field names.
   for (const [name, url] of [
+    ['v3 scheduler/get', '/api/fox/op/v3/device/scheduler/get'],
     ['v1 scheduler/get', '/api/fox/op/v1/device/scheduler/get'],
     ['v0 scheduler/get', '/api/fox/op/v0/device/scheduler/get'],
   ]) {
@@ -1716,7 +1724,7 @@ async function diagnose() {
     'RCurrent', 'RVolt', 'RPower', 'RFreq',
   ];
   try {
-    const r = await api('/api/fox/op/v0/device/real/query', { variables: allVars });
+    const r = await api('/api/fox/op/v1/device/real/query', { variables: allVars });
     if (r.errno === 0) {
       const datas = r.result?.[0]?.datas || [];
       const present = datas

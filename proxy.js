@@ -99,6 +99,8 @@ const server = http.createServer(async (req, res) => {
       const body = raw ? JSON.parse(raw) : {};
       if (!body.sn && !body.deviceSN) body.sn = config.deviceSN;
       body.deviceSN = body.deviceSN || body.sn || config.deviceSN;
+      // v1 real/query uses sns (array) instead of sn (string) — inject both forms.
+      if (!body.sns) body.sns = [body.deviceSN];
 
       const { body: out, isWrite } = await foxClient.proxyFoxRequest(foxPath, body);
 
