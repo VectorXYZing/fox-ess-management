@@ -187,9 +187,19 @@
   .bc-stop-row { margin-bottom: 16px; display: flex; align-items: center; gap: 12px; }
   .bc-stop-btn { padding: 8px 20px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; background: rgba(255,80,80,.15); border: 1px solid var(--red); color: var(--red); transition: background .15s; }
   .bc-stop-btn:hover { background: rgba(255,80,80,.28); }
-  .bc-params { border-top: 1px solid var(--line); padding-top: 14px; margin-bottom: 4px; }
-  .bc-param-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
-  .bc-param-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); min-width: 150px; }
+  .bc-params { border-top: 1px solid var(--line); padding-top: 16px; margin-bottom: 4px; display: flex; flex-direction: column; gap: 18px; }
+  .bc-param {}
+  .bc-param-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
+  .bc-param-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .7px; color: var(--muted); }
+  .bc-param-val { font-size: 20px; font-weight: 700; color: var(--text); line-height: 1; }
+  .bc-param-val-unit { font-size: 13px; font-weight: 400; color: var(--muted); margin-left: 2px; }
+  .bc-param-actions { display: flex; align-items: center; gap: 10px; }
+  .bc-apply-btn { padding: 4px 14px; border-radius: 6px; border: 1px solid var(--green); background: rgba(0,214,143,.12); color: var(--green); font-size: 12px; font-weight: 600; cursor: pointer; transition: background .15s; white-space: nowrap; }
+  .bc-apply-btn:hover { background: rgba(0,214,143,.24); }
+  .bc-slider { width: 100%; appearance: none; height: 5px; border-radius: 5px; outline: none; cursor: pointer; }
+  .bc-slider::-webkit-slider-thumb { appearance: none; width: 22px; height: 22px; border-radius: 50%; background: var(--green); cursor: pointer; box-shadow: 0 0 0 4px rgba(0,214,143,.18); transition: box-shadow .15s; }
+  .bc-slider::-webkit-slider-thumb:hover { box-shadow: 0 0 0 6px rgba(0,214,143,.28); }
+  .bc-slider::-moz-range-thumb { width: 22px; height: 22px; border-radius: 50%; background: var(--green); cursor: pointer; border: none; box-shadow: 0 0 0 4px rgba(0,214,143,.18); }
   .bc-diagnose { display: block; margin-top: 8px; font-size: 11px; color: var(--muted); background: none; border: none; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; padding: 0; }
   .bc-diagnose:hover { color: var(--text); }
   .log { margin-top: 14px; padding: 10px 12px; border-radius: 8px; background: #0a0d11; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; max-height: 120px; overflow: auto; }
@@ -263,6 +273,15 @@
   .modal .tip a { color: var(--blue); }
   .pw-warn { background: rgba(255,77,77,.12); border: 1px solid rgba(255,77,77,.45); color: var(--red); padding: 10px 14px; border-radius: 10px; margin: 0 0 14px; font-size: 13px; display: none; }
   .pw-warn.show { display: block; }
+  /* First-run welcome banner */
+  .setup-banner { display: none; background: linear-gradient(135deg, rgba(255,176,32,.08) 0%, rgba(0,214,143,.06) 100%); border: 1px solid var(--amber); border-radius: 14px; padding: 22px 24px; margin-bottom: 20px; }
+  .setup-banner.show { display: block; }
+  .setup-banner h3 { margin: 0 0 6px; font-size: 16px; color: var(--amber); }
+  .setup-banner p { margin: 0 0 16px; font-size: 13px; color: var(--muted); line-height: 1.5; }
+  .setup-checklist { list-style: none; padding: 0; margin: 0 0 18px; display: flex; flex-direction: column; gap: 8px; }
+  .setup-checklist li { font-size: 13px; color: var(--muted); display: flex; align-items: baseline; gap: 8px; }
+  .setup-checklist li::before { content: '○'; color: var(--amber); font-size: 11px; flex-shrink: 0; }
+  .setup-banner button { padding: 9px 22px; border-radius: 8px; background: var(--amber); border: none; color: #0f1216; font-size: 14px; font-weight: 700; cursor: pointer; }
   .modal .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
   .modal .err { color: var(--red); font-size: 12px; margin-top: 10px; min-height: 16px; }
   .modal .ok { color: var(--green); font-size: 12px; margin-top: 10px; min-height: 16px; }
@@ -311,6 +330,19 @@
 
     </div>
   </header>
+
+  <!-- First-run setup banner — hidden once configured -->
+  <div class="setup-banner" id="setupBanner">
+    <h3>⚡ Welcome to Fox ESS Management</h3>
+    <p>A few things needed before your dashboard comes to life:</p>
+    <ul class="setup-checklist">
+      <li>Your <strong>Fox ESS API key</strong> — from foxesscloud.com → User Center → API Management</li>
+      <li>Your <strong>inverter serial number</strong> — on the inverter label or in the Fox app</li>
+      <li>Your <strong>location</strong> (lat/lon) and <strong>solar system size</strong> for the forecast</li>
+      <li>Your <strong>AEMO region</strong> (VIC1, NSW1, QLD1, SA1, TAS1) for electricity prices</li>
+    </ul>
+    <button id="setupOpenBtn">Open Settings to get started →</button>
+  </div>
 
   <div class="modal-backdrop" id="settingsBackdrop" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
     <div class="modal">
@@ -640,21 +672,29 @@
 
       <!-- Parameters -->
       <div class="bc-params">
-        <div class="bc-param-row">
-          <span class="bc-param-label">Target SoC (charge to)</span>
-          <input type="range" class="slider" id="targetSoc" min="20" max="100" value="90" step="5" />
-          <span id="targetSocVal" style="min-width:40px">90%</span>
+        <div class="bc-param">
+          <div class="bc-param-head">
+            <span class="bc-param-label">Target SoC — charge to</span>
+            <span class="bc-param-val" id="targetSocVal">90<span class="bc-param-val-unit">%</span></span>
+          </div>
+          <input type="range" class="bc-slider" id="targetSoc" min="20" max="100" value="90" step="5" />
         </div>
-        <div class="bc-param-row">
-          <span class="bc-param-label">Power rate</span>
-          <input type="range" class="slider" id="chargeRate" min="1" max="10.5" value="5" step="0.5" />
-          <span id="chargeRateVal" style="min-width:60px">5.0 kW</span>
+        <div class="bc-param">
+          <div class="bc-param-head">
+            <span class="bc-param-label">Power rate</span>
+            <span class="bc-param-val" id="chargeRateVal">5.0<span class="bc-param-val-unit"> kW</span></span>
+          </div>
+          <input type="range" class="bc-slider" id="chargeRate" min="1" max="10.5" value="5" step="0.5" />
         </div>
-        <div class="bc-param-row">
-          <span class="bc-param-label">Min SoC (reserve)</span>
-          <input type="range" class="slider" id="minSoc" min="10" max="100" value="10" step="5" />
-          <span id="minSocVal" style="min-width:40px">10%</span>
-          <button id="applyMinSoc">Apply</button>
+        <div class="bc-param">
+          <div class="bc-param-head">
+            <span class="bc-param-label">Min SoC — reserve floor</span>
+            <div class="bc-param-actions">
+              <span class="bc-param-val" id="minSocVal">10<span class="bc-param-val-unit">%</span></span>
+              <button id="applyMinSoc" class="bc-apply-btn">Apply</button>
+            </div>
+          </div>
+          <input type="range" class="bc-slider" id="minSoc" min="10" max="100" value="10" step="5" />
         </div>
       </div>
 
@@ -1382,9 +1422,26 @@ $('customMins').addEventListener('input', () => {
   }
 });
 
-$('targetSoc').addEventListener('input', (e) => ($('targetSocVal').textContent = e.target.value + '%'));
-$('minSoc').addEventListener('input', (e) => ($('minSocVal').textContent = e.target.value + '%'));
-$('chargeRate').addEventListener('input', (e) => ($('chargeRateVal').textContent = Number(e.target.value).toFixed(1) + ' kW'));
+// Slider fill: colours the track from left up to the thumb position.
+function updateSliderFill(el) {
+  const pct = (el.value - el.min) / (el.max - el.min) * 100;
+  el.style.background = `linear-gradient(to right, var(--green) ${pct}%, var(--line) ${pct}%)`;
+}
+// Initialise fills on load, then keep them live.
+['targetSoc', 'chargeRate', 'minSoc'].forEach((id) => updateSliderFill($(id)));
+
+$('targetSoc').addEventListener('input', (e) => {
+  $('targetSocVal').innerHTML = e.target.value + '<span class="bc-param-val-unit">%</span>';
+  updateSliderFill(e.target);
+});
+$('minSoc').addEventListener('input', (e) => {
+  $('minSocVal').innerHTML = e.target.value + '<span class="bc-param-val-unit">%</span>';
+  updateSliderFill(e.target);
+});
+$('chargeRate').addEventListener('input', (e) => {
+  $('chargeRateVal').innerHTML = Number(e.target.value).toFixed(1) + '<span class="bc-param-val-unit"> kW</span>';
+  updateSliderFill(e.target);
+});
 
 function pad2(n) { return String(n).padStart(2, '0'); }
 
@@ -2302,11 +2359,14 @@ $('recRefresh').addEventListener('click', () => loadRecommendation().catch((e) =
     lg.addEventListener('click', () => lg.parentElement.classList.toggle('collapsed'));
   });
 
-  // First-run: open settings automatically if Fox creds aren't configured yet.
+  // First-run: show welcome banner and open settings if Fox creds aren't configured.
   if (cfg.configured === false) {
-    subEl.textContent = 'Welcome! Enter the admin password to finish setup.';
+    $('setupBanner').classList.add('show');
+    subEl.textContent = 'Enter the admin password, then fill in your Fox ESS credentials.';
+    $('settingsTitle').textContent = 'First-time setup';
     openSettings(false);
   }
+  $('setupOpenBtn')?.addEventListener('click', () => openSettings(true));
 })();
 </script>
 </body>

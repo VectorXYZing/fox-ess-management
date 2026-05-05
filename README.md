@@ -6,6 +6,21 @@ No npm dependencies. No build step. No database.
 
 > **⚠ Australia / AEMO only.** Price data comes from the Australian Energy Market Operator (AEMO NEM) via nemweb. If you're not on the NEM (most of Australia, excluding WA and NT), only the Fox ESS parts will be useful — the price charts will be empty.
 
+## Screenshots
+
+<table>
+  <tr>
+    <td><img src="screenshots/power-flow.png" width="220" alt="Live power flow"/><br/><sub><b>Live power flow</b> — animated connections, battery SoC ring, today's totals</sub></td>
+    <td><img src="screenshots/todays-plan.png" width="220" alt="Today's Plan"/><br/><sub><b>Today's Plan</b> — midday recommendation engine with plain-English narrative</sub></td>
+    <td><img src="screenshots/battery-control.png" width="220" alt="Battery Control"/><br/><sub><b>Battery Control</b> — force charge or dump to grid, auto-stop on SoC threshold</sub></td>
+  </tr>
+  <tr>
+    <td><img src="screenshots/prices-solar.png" width="220" alt="Price chart and solar forecast"/><br/><sub><b>Price chart + solar forecast</b> — AEMO spot with top-up/dump windows highlighted</sub></td>
+    <td><img src="screenshots/weekly-totals.png" width="220" alt="Weekly energy totals"/><br/><sub><b>Weekly totals</b> — 7-day energy grid with heat-map bars and dump-window export</sub></td>
+    <td></td>
+  </tr>
+</table>
+
 ## Features
 
 - Live power flow visualization with animated SVG connections
@@ -13,7 +28,7 @@ No npm dependencies. No build step. No database.
 - Electricity price chart: AEMO spot + retail estimate with TOU markup, 6 h history and 18 h forecast
 - Solar PV forecast (Open-Meteo tilted-irradiance model)
 - Solar calibration panel — weighted `actual / ideal` fit across N days, one-click apply
-- Scheduler control: force-charge now, stop/clear, min-SoC, target SoC
+- Scheduler control: force-charge and dump-to-grid with auto-stop, stop/clear, min-SoC, target SoC
 - Read-only public view + admin-password-gated writes
 - Optional push notifications (ntfy.sh) when the scheduler acts
 
@@ -22,32 +37,78 @@ No npm dependencies. No build step. No database.
 - A Fox ESS hybrid inverter connected to Fox ESS Cloud
 - A Fox ESS API key — from https://www.foxesscloud.com → **User Center → API Management**
 - The serial number of your inverter (shown on the inverter and in the Fox app)
-- Either Node.js 18+ or Docker
+- Either Docker (recommended) or Node.js 18+
 
-## Quick start with Docker (recommended)
+---
+
+## Quick start
+
+### Guided setup (easiest)
+
+Clone the repo and run the interactive setup script — it asks the questions, writes the config files, and starts Docker for you:
 
 ```bash
-cp .env.example .env
-cp config.example.json config.json   # required: Docker bind-mounts this file
-# optional: edit .env and set a strong ADMIN_PASSWORD (default is "letpscontrol")
+git clone https://github.com/VectorXYZing/fox-ess-management.git
+cd fox-ess-management
+bash setup.sh
+```
+
+Then open **http://localhost:8080**.
+
+### Manual Docker setup
+
+```bash
+git clone https://github.com/VectorXYZing/fox-ess-management.git
+cd fox-ess-management
+cp .env.example .env          # set ADMIN_PASSWORD
+cp config.example.json config.json
 docker compose up -d
 ```
 
-Open http://localhost:8080 (or http://\<host\>:8080 from another device on your LAN). Click the ⚙ Settings icon, enter the admin password, and fill in your Fox ESS API key, device SN, solar specs, and AEMO region. Changes are saved to `config.json` on the host and take effect immediately.
+Open http://localhost:8080, click ⚙ Settings, enter your admin password, and fill in your Fox ESS credentials. Changes save to `config.json` immediately.
 
-## Quick start without Docker
+### Without Docker
 
 ```bash
 cp config.example.json config.json
 ADMIN_PASSWORD='something-long-and-random' node proxy.js
 ```
 
-If you omit `ADMIN_PASSWORD`, a temporary one is generated and printed to the log on startup.
+### Environment variable config
+
+All key settings can be passed as environment variables instead of (or to override) `config.json`. Useful for NAS, cloud, or Docker deployments where mounting a file is awkward:
+
+```bash
+docker run -d \
+  -e ADMIN_PASSWORD=yourpassword \
+  -e FOX_API_KEY=your-api-key \
+  -e DEVICE_SN=your-serial \
+  -e AEMO_REGION=VIC1 \
+  -e LATITUDE=-37.81 \
+  -e LONGITUDE=144.96 \
+  -e SYSTEM_KW=10 \
+  -e BATTERY_KWH=20 \
+  -p 8080:8080 \
+  ghcr.io/vectorxyzing/fox-ess-management:latest
+```
+
+| Variable | Description |
+|----------|-------------|
+| `ADMIN_PASSWORD` | Password for write access (required) |
+| `FOX_API_KEY` | Fox ESS API key |
+| `DEVICE_SN` | Inverter serial number |
+| `AEMO_REGION` | NEM region (`VIC1` `NSW1` `QLD1` `SA1` `TAS1`) |
+| `TIMEZONE` | e.g. `Australia/Melbourne` |
+| `LATITUDE` / `LONGITUDE` | Location for solar forecast |
+| `SYSTEM_KW` | Solar system size in kW |
+| `BATTERY_KWH` | Battery capacity in kWh |
+
+---
 
 ## How the lock system works
 
 - **Anyone who reaches the URL** sees live power flow, today's totals, retail prices, and the solar forecast. They can click Refresh.
-- **Anything that changes state** (Live polling, force charge, scheduler enable/disable, min-SoC, the Settings page) requires the admin password. Click the 🔒 icon in the header to unlock for the session.
+- **Anything that changes state** (Live polling, force charge/dump, scheduler, Settings) requires the admin password. Click any locked control to be prompted.
 - `/api/settings/verify` rate-limits failed attempts per IP (5 attempts per 5 minutes → 30 s backoff).
 
 ## Exposing it publicly
@@ -70,6 +131,8 @@ Also free, also works behind CGNAT. Install `cloudflared` on the Pi, create a tu
 Just run it and only visit from inside your home network. No tunnel needed.
 
 ## Running on a Raspberry Pi
+
+See **[docs/pi-setup.md](docs/pi-setup.md)** for a complete step-by-step guide including Docker install, Tailscale Funnel, and keeping the image up to date.
 
 A Pi 3B+ or newer with 1 GB+ RAM has plenty of headroom (this app uses ~50–80 MB idle). A Pi 5 barely notices it alongside other services like PiAware / graphs1090.
 

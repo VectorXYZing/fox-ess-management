@@ -1,13 +1,26 @@
 services:
   fox-ess:
-    build: .
-    image: fox-ess-management:latest
+    # Use the pre-built image from GitHub Container Registry (no build required).
+    # To build locally instead, comment the image line and uncomment build.
+    image: ghcr.io/vectorxyzing/fox-ess-management:latest
+    # build: .
     container_name: fox-ess
     restart: unless-stopped
     ports:
-      - "8081:8080"
+      - "${PORT:-8080}:8080"
     environment:
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-letpscontrol}
+      # Required
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-changeme}
+      # Optional — override config.json values without editing the file.
+      # Useful for Docker/NAS/cloud deployments where mounting a file is awkward.
+      FOX_API_KEY:  ${FOX_API_KEY:-}
+      DEVICE_SN:    ${DEVICE_SN:-}
+      AEMO_REGION:  ${AEMO_REGION:-}
+      TIMEZONE:     ${TIMEZONE:-}
+      LATITUDE:     ${LATITUDE:-}
+      LONGITUDE:    ${LONGITUDE:-}
+      SYSTEM_KW:    ${SYSTEM_KW:-}
+      BATTERY_KWH:  ${BATTERY_KWH:-}
     volumes:
       - ./config.json:/app/config.json
       - ./data:/app/data
