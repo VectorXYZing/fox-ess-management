@@ -1,0 +1,49 @@
+{
+  "foxApiKey": "",
+  "deviceSN": "",
+  "aemoRegion": "VIC1",
+  "timezone": "Australia/Melbourne",
+  "port": 8080,
+
+  "pollSeconds": 30,
+  "todayPollSeconds": 600,
+  "schedulerPollSeconds": 600,
+  "pricePollSeconds": 300,
+
+  "solar": {
+    "latitude": 0,
+    "longitude": 0,
+    "tiltDegrees": 30,
+    "azimuthOpenMeteo": 180,
+    "systemKw": 5.0,
+    "efficiencyFactor": 0.85
+  },
+
+  "battery": {
+    "capacityKwh": 10.0,
+    "maxDischargeKw": 5.0
+  },
+
+  "recommendation": {
+    "_comment": "Midday top-up recommender. Predicts end-of-night SoC using rolling average house load + solar forecast, and — when short — recommends a grid force-charge during the cheapest AEMO window before the evening dump. Read-only: never writes to the scheduler.",
+    "enabled": true,
+    "reserveSoCPct": 20,
+    "dumpWindowLocal": { "start": "17:30", "end": "19:30" },
+    "topUpSearchLocal": { "start": "10:00", "end": "15:00" },
+    "activeWindowLocal": { "start": "10:30", "end": "14:30" },
+    "loadDays": 7,
+    "safetyMarginPct": 10
+  },
+
+  "flowPowerMarkup": {
+    "lossFactor": 1.0,
+    "gstRate": 0.1,
+    "dailySupplyDollars": 1.0,
+    "feedInFlatCentsPerKwh": 0,
+    "tou": {
+      "offPeak":  { "flatCentsPerKwh": 5.0, "hours": "22-07" },
+      "shoulder": { "flatCentsPerKwh": 8.0, "hours": "07-16,20-22" },
+      "peak":     { "flatCentsPerKwh": 12.0, "hours": "16-20" }
+    }
+  }
+}

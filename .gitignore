@@ -1,0 +1,19 @@
+# Secrets and per-deployment config
+.env
+config.json
+
+# Runtime state (persisted data, not for source control)
+data/*
+!data/.gitkeep
+state/
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Editor/OS and tooling
+.DS_Store
+.vscode/
+.idea/
+*.swp
+.claude/

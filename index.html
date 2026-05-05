@@ -1,0 +1,2313 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Fox ESS Control</title>
+<style>
+  :root {
+    --bg: #0f1216;
+    --panel: #171c23;
+    --panel2: #1f2630;
+    --line: #2a323e;
+    --text: #e7ecf2;
+    --muted: #8a94a3;
+    --green: #00d68f;
+    --amber: #ffb020;
+    --red: #ff4d4d;
+    --blue: #3ea6ff;
+    --purple: #b085ff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif; }
+  .app { max-width: 1280px; margin: 0 auto; padding: 20px; }
+
+  /* ── Sticky header ────────────────────────────────────────────────────── */
+  header {
+    position: sticky; top: 0; z-index: 50;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    background: rgba(15, 18, 22, 0.94);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    border-bottom: 1px solid var(--line);
+    margin: -20px -20px 20px;
+    padding: 12px 20px;
+  }
+  .hdr-brand { display: flex; align-items: center; gap: 9px; }
+  .hdr-brand h1 { font-size: 19px; font-weight: 700; margin: 0; letter-spacing: -.3px; }
+  .hdr-brand h1 em { font-style: normal; color: var(--amber); }
+  .hdr-controls { display: flex; align-items: center; gap: 7px; }
+  .hdr-sep { width: 1px; height: 20px; background: var(--line); margin: 0 3px; flex-shrink: 0; }
+  .hdr-status { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 5px 10px; white-space: nowrap; }
+
+  /* ── Toggle ───────────────────────────────────────────────────────────── */
+  .toggle { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel2); font-size: 13px; }
+  .toggle .pill { width: 28px; height: 16px; background: var(--line); border-radius: 10px; position: relative; transition: background .2s; }
+  .toggle .pill::after { content: ''; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; background: #fff; border-radius: 50%; transition: transform .2s; }
+  .toggle.on { border-color: var(--green); }
+  .toggle.on .pill { background: var(--green); }
+  .toggle.on .pill::after { transform: translateX(12px); }
+  .toggle .label { color: var(--muted); font-weight: 500; letter-spacing: .5px; text-transform: uppercase; font-size: 11px; }
+  .toggle.on .label { color: var(--green); }
+
+  /* ── Status dot ───────────────────────────────────────────────────────── */
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); transition: background .3s; flex-shrink: 0; }
+  .dot.ok  { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .dot.err { background: var(--red); }
+  button { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; font: inherit; cursor: pointer; transition: background .15s, border-color .15s; }
+  button:hover { background: #2a323e; border-color: #3a4452; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button.primary { background: var(--green); color: #052b1e; border-color: var(--green); font-weight: 600; }
+  button.primary:hover { background: #00f2a1; }
+  button.danger { background: var(--red); color: #2b0505; border-color: var(--red); }
+  input[type="number"], input[type="text"], select { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: inherit; }
+  .grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
+  .grid-half { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px; }
+  .panel h2 { margin: 0 0 14px; font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+  .row { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  .kv { display: flex; flex-direction: column; gap: 4px; }
+  .kv .k { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
+  .kv .v { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .kv .v.small { font-size: 16px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
+  .tile { background: var(--panel2); border-radius: 10px; padding: 12px 14px; }
+  .tile .k { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; }
+  .tile .v { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .tile.pv .v { color: var(--amber); }
+  .tile.load .v { color: var(--blue); }
+  .tile.import .v { color: var(--red); }
+  .tile.export .v { color: var(--green); }
+  .tile.charge .v { color: var(--purple); }
+  .tile.discharge .v { color: #ff8a5b; }
+  .tile.soc .v { color: var(--green); }
+  .week-grid td.soc { --barColor: rgba(0, 214, 143, .18); }
+  .week-grid th.soc { color: var(--green); }
+  /* 7-day summary strip */
+  .week-grid { width: 100%; border-collapse: collapse; margin-top: 14px; font-variant-numeric: tabular-nums; }
+  .week-grid th, .week-grid td { padding: 6px 8px; text-align: right; font-size: 12px; }
+  .week-grid thead th { color: var(--muted); font-weight: 500; text-transform: uppercase; letter-spacing: .5px; font-size: 10px; border-bottom: 1px solid var(--line); }
+  .week-grid thead th.today { color: var(--text); }
+  .week-grid tbody th { text-align: left; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; font-weight: 500; padding-right: 12px; }
+  .week-grid tbody tr { border-bottom: 1px solid #151a20; }
+  .week-grid tbody tr:last-child { border-bottom: none; }
+  .week-grid td { color: var(--text); position: relative; }
+  .week-grid td.today { font-weight: 600; }
+  .week-grid td.zero { color: var(--muted); opacity: .45; }
+  .week-grid td.pv { --barColor: rgba(255, 176, 32, .18); }
+  .week-grid td.load { --barColor: rgba(62, 166, 255, .18); }
+  .week-grid td.import { --barColor: rgba(255, 77, 77, .18); }
+  .week-grid td.export { --barColor: rgba(0, 214, 143, .18); }
+  .week-grid td.charge { --barColor: rgba(176, 133, 255, .18); }
+  .week-grid td.discharge { --barColor: rgba(255, 138, 91, .18); }
+  .week-grid th.pv { color: var(--amber); }
+  .week-grid th.load { color: var(--blue); }
+  .week-grid th.import { color: var(--red); }
+  .week-grid th.export { color: var(--green); }
+  .week-grid th.charge { color: var(--purple); }
+  .week-grid th.discharge { color: #ff8a5b; }
+  .week-grid tr.today-row th, .week-grid tr.today-row td { font-weight: 600; }
+  .week-grid td .sub.dump-yes { color: var(--green); }
+  .week-grid td .sub.dump-no { color: var(--muted); opacity: .35; }
+  .week-grid td .bar { position: absolute; inset: 2px 2px 2px 2px; background: var(--barColor); border-radius: 3px; z-index: 0; transform-origin: left; transition: transform .3s ease; }
+  .week-grid td .bar.bar-dump { background: rgba(0, 214, 143, .55); z-index: 1; }
+  .week-grid td > span:not(.bar) { position: relative; z-index: 2; }
+  .week-grid td .sub { display: inline-block; margin-right: 8px; font-size: 10px; font-weight: 500; opacity: .75; letter-spacing: .3px; vertical-align: baseline; }
+  /* --- Hero "live power flow" --- */
+  .hero { position: relative; display: grid; grid-template-columns: 1fr minmax(220px, 260px) 1fr; grid-template-rows: auto auto; gap: 24px 48px; align-items: center; justify-items: stretch; padding: 8px 4px 18px; max-width: 1100px; margin: 0 auto; }
+  .hero-flow-svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; overflow: visible; }
+  .hero-flow-svg line { transition: stroke .2s; }
+  .hero-flow-svg line.active { animation: dashFlow 1.4s linear infinite; }
+  .hero-flow-svg line.active.reverse { animation-direction: reverse; }
+  @keyframes dashFlow { to { stroke-dashoffset: -14; } }
+  .hero .node, .hero .soc-ring { position: relative; z-index: 1; }
+  .node { display: flex; align-items: center; gap: 14px; padding: 14px 18px; background: linear-gradient(135deg, var(--panel2) 0%, rgba(31,38,48,.5) 100%); border: 1px solid var(--line); border-radius: 14px; transition: border-color .2s, transform .15s; }
+  .node:hover { border-color: #3a4452; }
+  .node .glyph { width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; font-weight: 700; font-size: 18px; letter-spacing: -.5px; flex-shrink: 0; }
+  .node.pv .glyph { background: rgba(255,176,32,.15); color: var(--amber); }
+  .node.grid .glyph { background: rgba(255,77,77,.15); color: var(--red); }
+  .node.grid.exporting .glyph { background: rgba(0,214,143,.15); color: var(--green); }
+  .node.bat .glyph { background: rgba(176,133,255,.15); color: var(--purple); }
+  .node.load .glyph { background: rgba(62,166,255,.15); color: var(--blue); }
+  .node .body { flex: 1; min-width: 0; }
+  .node .lbl { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 2px; }
+  .node .val { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
+  .node.pv .val { color: var(--amber); }
+  .node.grid .val { color: var(--red); }
+  .node.grid.exporting .val { color: var(--green); }
+  .node.load .val { color: var(--blue); }
+  .node.bat .val { color: var(--purple); }
+  .node.tl { grid-column: 1; grid-row: 1; justify-content: flex-end; flex-direction: row-reverse; text-align: right; }
+  .node.tr { grid-column: 3; grid-row: 1; }
+  .node.bl { grid-column: 1; grid-row: 2; justify-content: flex-end; flex-direction: row-reverse; text-align: right; }
+  .node.br { grid-column: 3; grid-row: 2; }
+  .soc-ring { position: relative; width: 220px; height: 220px; grid-column: 2; grid-row: 1 / span 2; justify-self: center; }
+  .soc-ring svg { transform: rotate(-90deg); width: 220px; height: 220px; }
+  .soc-ring .pct { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; }
+  .soc-ring .pct .big { font-size: 46px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -1px; line-height: 1; }
+  .soc-ring .pct .big .pc { font-size: 22px; font-weight: 500; color: var(--muted); margin-left: 2px; }
+  .soc-ring .pct small { display: block; font-size: 10px; font-weight: 500; color: var(--muted); text-transform: uppercase; letter-spacing: 1.5px; margin-top: 6px; }
+  .today-head { display: flex; align-items: baseline; justify-content: center; gap: 14px; margin: 10px 0 14px; }
+  .today-head h2 { margin: 0; }
+  .today-head .net { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .today-wrap { max-width: 920px; margin: 0 auto; }
+  .price-now { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+  .price-now .v { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .price-now .sub { color: var(--muted); font-size: 12px; }
+  .chart-wrap { position: relative; }
+  .price-chart { width: 100%; height: 180px; display: block; }
+  .price-chart rect { cursor: crosshair; }
+  .price-chart rect:hover { filter: brightness(1.2); }
+  .chart-tooltip { position: absolute; background: #0a0d11; border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; font-size: 12px; color: var(--text); pointer-events: none; white-space: nowrap; z-index: 10; box-shadow: 0 4px 12px rgba(0,0,0,.5); display: none; }
+  .chart-tooltip .sub { color: var(--muted); font-size: 11px; margin-top: 2px; }
+  .price-legend { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; margin-top: 6px; }
+  .controls { margin-top: 16px; }
+  .control-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+  .control-row label { color: var(--muted); font-size: 12px; min-width: 160px; text-transform: uppercase; letter-spacing: .5px; }
+  .presets { display: flex; gap: 6px; flex-wrap: wrap; }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 8px; }
+  /* --- Battery Control redesign --- */
+  .bc-duration { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
+  .bc-duration-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .7px; color: var(--muted); margin-right: 4px; white-space: nowrap; }
+  .bc-preset { padding: 5px 13px; border-radius: 20px; border: 1px solid var(--line); background: transparent; color: var(--muted); font-size: 13px; cursor: pointer; transition: background .15s, color .15s, border-color .15s; }
+  .bc-preset:hover { border-color: var(--amber); color: var(--amber); }
+  .bc-preset.active { background: rgba(255,176,32,.15); border-color: var(--amber); color: var(--amber); font-weight: 600; }
+  .bc-custom-mins { width: 68px; padding: 4px 8px; border-radius: 20px; border: 1px solid var(--line); background: transparent; color: var(--text); font-size: 13px; text-align: center; }
+  .bc-custom-mins::placeholder { color: var(--muted); }
+  .bc-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+  .bc-card { border-radius: 12px; padding: 14px 16px; border: 1px solid var(--line); background: var(--panel2); display: flex; flex-direction: column; gap: 6px; }
+  .bc-card-icon { font-size: 22px; line-height: 1; margin-bottom: 2px; }
+  .bc-card-title { font-size: 14px; font-weight: 600; color: var(--text); }
+  .bc-card-desc { font-size: 11px; color: var(--muted); flex: 1; }
+  .bc-card-charge { border-top: 3px solid var(--amber); }
+  .bc-card-dump { border-top: 3px solid var(--green); }
+  .bc-action { width: 100%; padding: 8px 0; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; border: none; margin-top: 4px; transition: opacity .15s; }
+  .bc-action:hover { opacity: .85; }
+  .bc-action-charge { background: var(--amber); color: #0f1216; }
+  .bc-action-dump { background: var(--green); color: #0f1216; }
+  .bc-stop-row { margin-bottom: 16px; display: flex; align-items: center; gap: 12px; }
+  .bc-stop-btn { padding: 8px 20px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; background: rgba(255,80,80,.15); border: 1px solid var(--red); color: var(--red); transition: background .15s; }
+  .bc-stop-btn:hover { background: rgba(255,80,80,.28); }
+  .bc-params { border-top: 1px solid var(--line); padding-top: 14px; margin-bottom: 4px; }
+  .bc-param-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+  .bc-param-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); min-width: 150px; }
+  .bc-diagnose { display: block; margin-top: 8px; font-size: 11px; color: var(--muted); background: none; border: none; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; padding: 0; }
+  .bc-diagnose:hover { color: var(--text); }
+  .log { margin-top: 14px; padding: 10px 12px; border-radius: 8px; background: #0a0d11; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; max-height: 120px; overflow: auto; }
+  .log .ok { color: var(--green); }
+  .log .err { color: var(--red); }
+  .slider { appearance: none; width: 220px; height: 4px; background: var(--line); border-radius: 4px; outline: none; }
+  .slider::-webkit-slider-thumb { appearance: none; width: 16px; height: 16px; background: var(--green); border-radius: 50%; cursor: pointer; }
+  .sched-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 10px; }
+  .sched-table th { text-align: left; padding: 6px 8px; color: var(--muted); border-bottom: 1px solid var(--line); font-weight: 500; text-transform: uppercase; letter-spacing: .5px; font-size: 10px; }
+  .sched-table td { padding: 6px 8px; border-bottom: 1px solid #151a20; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .sched-table tr.on td { color: var(--text); }
+  .sched-table tr.active td { color: var(--green); font-weight: 600; }
+  @media (max-width: 900px) {
+    .grid-half { grid-template-columns: 1fr; }
+    .hero { grid-template-columns: 1fr; grid-template-rows: auto; gap: 14px; }
+    .node.tl, .node.tr, .node.bl, .node.br { grid-column: 1; grid-row: auto; justify-content: flex-start; flex-direction: row; text-align: left; }
+    .soc-ring { grid-column: 1; grid-row: auto; justify-self: center; }
+  }
+  /* --- iPhone-and-narrower polish --- */
+  @media (max-width: 640px) {
+    .app { padding: 12px; }
+    header { margin: -12px -12px 12px; padding: 10px 12px; gap: 8px; }
+    .panel { padding: 12px; border-radius: 10px; }
+    .panel h2 { margin: 0 0 10px; font-size: 12px; }
+    /* Today: 3 equal columns with min-width:0 so tile content can shrink */
+    .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+    .tile { padding: 8px 10px; min-width: 0; }
+    .tile .k { font-size: 10px; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tile .v { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    /* Week grid: tighter cells, smaller text */
+    .week-grid { margin-top: 10px; }
+    .week-grid th, .week-grid td { padding: 4px 5px; }
+    .week-grid thead th { font-size: 9px; }
+    .week-grid tbody th { font-size: 10px; padding-right: 6px; line-height: 1.15; }
+    .week-grid td { font-size: 11px; }
+    .week-grid td .sub { display: block; margin-right: 0; margin-top: 1px; font-size: 9px; }
+    /* Price-chart legend: stack the middle help text on its own line */
+    .price-legend { flex-wrap: wrap; row-gap: 4px; font-size: 10px; }
+    .price-legend > span:nth-child(2) { flex: 1 1 100%; text-align: center; order: 3; opacity: .8; }
+    /* Headlines + numbers shrink */
+    .price-now .v { font-size: 26px; }
+    /* Recommendation card: tighter row gaps */
+    #recPanel .row { gap: 12px; }
+    #recHeadline { font-size: 18px !important; }
+    /* On narrow screens the timestamp-only pill is meaningless — hide it entirely */
+    .hdr-status { display: none; }
+    /* Shrink Refresh to icon-only */
+    #refresh .btn-label { display: none; }
+    #refresh { padding: 8px 10px; }
+  }
+  /* --- Settings modal --- */
+  .icon-btn { background: var(--panel2); border: 1px solid var(--line); color: var(--muted); border-radius: 8px; width: 34px; height: 34px; display: inline-grid; place-items: center; cursor: pointer; padding: 0; }
+  .icon-btn:hover { color: var(--text); border-color: #3a4452; }
+  .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: none; z-index: 100; align-items: flex-start; justify-content: center; padding: 40px 16px; overflow-y: auto; }
+  .modal-backdrop.show { display: flex; }
+  .modal { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; width: 100%; max-width: 640px; padding: 22px 22px 18px; }
+  .modal h2 { margin: 0 0 6px; font-size: 16px; font-weight: 600; color: var(--text); text-transform: none; letter-spacing: 0; }
+  .modal .sub { color: var(--muted); font-size: 12px; margin-bottom: 16px; }
+  .modal .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 14px; }
+  .modal .form-grid .full { grid-column: 1 / -1; }
+  .modal label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+  .modal label .hint { font-size: 11px; color: var(--muted); opacity: .7; font-weight: normal; }
+  .modal input, .modal select { width: 100%; font-size: 13px; }
+  .modal fieldset { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px 14px; margin: 14px 0 0; }
+  .modal fieldset legend { padding: 0 6px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .6px; cursor: pointer; user-select: none; }
+  .modal fieldset legend::before { content: '▾ '; display: inline-block; transition: transform .15s; color: var(--muted); font-size: 10px; }
+  .modal fieldset.collapsed { padding-top: 2px; padding-bottom: 2px; }
+  .modal fieldset.collapsed legend::before { transform: rotate(-90deg); }
+  .modal fieldset.collapsed .form-grid { display: none; }
+  .modal .tip { background: rgba(62,166,255,.08); border: 1px solid rgba(62,166,255,.25); color: var(--text); font-size: 12px; padding: 10px 12px; border-radius: 8px; margin: 12px 0 0; line-height: 1.5; }
+  .modal .tip a { color: var(--blue); }
+  .pw-warn { background: rgba(255,77,77,.12); border: 1px solid rgba(255,77,77,.45); color: var(--red); padding: 10px 14px; border-radius: 10px; margin: 0 0 14px; font-size: 13px; display: none; }
+  .pw-warn.show { display: block; }
+  .modal .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+  .modal .err { color: var(--red); font-size: 12px; margin-top: 10px; min-height: 16px; }
+  .modal .ok { color: var(--green); font-size: 12px; margin-top: 10px; min-height: 16px; }
+  /* --- Locked (read-only) mode --- */
+  /* Locked mode: dim controls visually; clicks are intercepted by JS capture handler → unlock prompt */
+  body.locked .battery-controls, body.locked #schedTable { opacity: .55; }
+  body.locked #liveToggle { opacity: .55; }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header>
+    <!-- Brand -->
+    <div class="hdr-brand">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="rgba(255,176,32,.15)" stroke="var(--amber)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+      </svg>
+      <h1><em>Fox</em> ESS</h1>
+    </div>
+
+    <!-- Controls -->
+    <div class="hdr-controls">
+
+      <!-- Status: dot + last-updated time -->
+      <div class="hdr-status">
+        <div class="dot" id="dot"></div>
+        <span class="hdr-ts" id="updated">—</span>
+      </div>
+
+      <!-- Live toggle + Refresh -->
+      <div class="toggle" id="liveToggle" title="When on, live power flow polls Fox every 30s. Off = saves API calls.">
+        <div class="pill"></div>
+        <span class="label">Live</span>
+      </div>
+      <button id="refresh" title="Refresh all data">
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-.12em;margin-right:5px" aria-hidden="true"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg><span class="btn-label">Refresh</span>
+      </button>
+
+      <div class="hdr-sep"></div>
+
+      <!-- Admin: settings (also the unlock entry point when locked) -->
+      <button class="icon-btn" id="settingsBtn" title="Settings" aria-label="Settings">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </button>
+
+    </div>
+  </header>
+
+  <div class="modal-backdrop" id="settingsBackdrop" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+    <div class="modal">
+      <h2 id="settingsTitle">Settings</h2>
+      <div class="sub" id="settingsSub">Enter the admin password to view or edit.</div>
+
+      <div id="settingsAuth">
+        <label class="full">Admin password
+          <input type="password" id="adminPw" autocomplete="current-password" />
+        </label>
+        <div class="actions">
+          <button id="authCancel">Cancel</button>
+          <button class="primary" id="authOk">Unlock</button>
+        </div>
+      </div>
+
+      <div id="settingsForm" style="display:none">
+        <div class="pw-warn" id="pwWarn">
+          ⚠ You're still using the default admin password. Anyone on the internet with your
+          URL could change your Fox ESS settings. Set a new <code>ADMIN_PASSWORD</code>
+          environment variable and restart the server.
+        </div>
+
+        <fieldset>
+          <legend>Fox ESS</legend>
+          <div class="form-grid">
+            <label class="full">API key <span class="hint">(leave masked value to keep unchanged)</span>
+              <input type="text" id="s_foxApiKey" autocomplete="off" />
+            </label>
+            <label class="full">Device SN <span class="hint">(the serial on your inverter)</span>
+              <input type="text" id="s_deviceSN" autocomplete="off" />
+            </label>
+          </div>
+          <div class="tip">
+            Need an API key? Log in to <a href="https://www.foxesscloud.com" target="_blank" rel="noopener">foxesscloud.com</a>,
+            open <b>User Center → API Management</b>, generate a token and paste it above.
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Region &amp; timezone</legend>
+          <div class="form-grid">
+            <label>AEMO region
+              <select id="s_aemoRegion">
+                <option value="VIC1">VIC1 (Victoria)</option>
+                <option value="NSW1">NSW1 (New South Wales)</option>
+                <option value="QLD1">QLD1 (Queensland)</option>
+                <option value="SA1">SA1 (South Australia)</option>
+                <option value="TAS1">TAS1 (Tasmania)</option>
+              </select>
+            </label>
+            <label>Timezone <span class="hint">(IANA, e.g. Australia/Sydney)</span>
+              <input type="text" id="s_timezone" placeholder="Australia/Melbourne" />
+            </label>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Solar PV</legend>
+          <div class="form-grid">
+            <label>Latitude <input type="number" step="0.0001" id="s_lat" /></label>
+            <label>Longitude <input type="number" step="0.0001" id="s_lon" /></label>
+            <label>System kW <input type="number" step="0.1" id="s_kw" /></label>
+            <label>Tilt (°) <input type="number" step="1" id="s_tilt" /></label>
+            <label>Azimuth <span class="hint">(0=S, 180=N, -90=E, 90=W)</span>
+              <input type="number" step="1" id="s_az" />
+            </label>
+            <label>Efficiency factor <span class="hint">(0.75–0.90 typical)</span>
+              <input type="number" step="0.01" id="s_eff" />
+            </label>
+            <label class="full">Calibration start date <span class="hint">(optional — ignore actuals before this date)</span>
+              <input type="date" id="s_calibStart" />
+            </label>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Battery</legend>
+          <div class="form-grid">
+            <label>Capacity (kWh) <input type="number" step="0.1" id="s_batKwh" /></label>
+          </div>
+        </fieldset>
+
+        <fieldset class="collapsed">
+          <legend>Push notifications (optional)</legend>
+          <div class="form-grid">
+            <label>ntfy topic <span class="hint">(pick any unguessable string)</span>
+              <input type="text" id="s_ntfyTopic" placeholder="fox-ess-yourname-a7b2" autocomplete="off" />
+            </label>
+            <label>ntfy server <span class="hint">(default: ntfy.sh)</span>
+              <input type="text" id="s_ntfyServer" placeholder="ntfy.sh" />
+            </label>
+          </div>
+          <div class="tip">
+            Install the <a href="https://ntfy.sh" target="_blank" rel="noopener">ntfy</a> app on your phone,
+            subscribe to the same topic, and you'll get a push when the scheduler runs or settings change.
+            <button id="ntfyTestBtn" style="margin-left:10px">Send test</button>
+          </div>
+        </fieldset>
+
+        <fieldset class="collapsed">
+          <legend>Polling intervals (advanced)</legend>
+          <div class="form-grid">
+            <label>Live (s) <input type="number" id="s_pollSeconds" min="10" /></label>
+            <label>Today (s) <input type="number" id="s_todayPollSeconds" min="60" /></label>
+            <label>Scheduler (s) <input type="number" id="s_schedulerPollSeconds" min="60" /></label>
+            <label>Price (s) <input type="number" id="s_pricePollSeconds" min="60" /></label>
+          </div>
+        </fieldset>
+
+        <fieldset class="collapsed">
+          <legend>Retail pricing markup (advanced)</legend>
+          <div class="form-grid">
+            <label>Loss factor <input type="number" step="0.01" id="s_loss" /></label>
+            <label>GST rate <input type="number" step="0.01" id="s_gst" /></label>
+            <label>Daily supply ($) <input type="number" step="0.01" id="s_supply" /></label>
+            <label>Feed-in (c/kWh) <input type="number" step="0.1" id="s_fit" /></label>
+            <label>Off-peak (c/kWh) <input type="number" step="0.1" id="s_tou_off" /></label>
+            <label>Off-peak hours <input type="text" id="s_tou_off_h" placeholder="20-07" /></label>
+            <label>Shoulder (c/kWh) <input type="number" step="0.1" id="s_tou_sh" /></label>
+            <label>Shoulder hours <input type="text" id="s_tou_sh_h" placeholder="07-15" /></label>
+            <label>Peak (c/kWh) <input type="number" step="0.1" id="s_tou_pk" /></label>
+            <label>Peak hours <input type="text" id="s_tou_pk_h" placeholder="15-20" /></label>
+          </div>
+        </fieldset>
+
+        <div class="err" id="settingsErr"></div>
+        <div class="ok" id="settingsOk"></div>
+
+        <div class="actions">
+          <button id="settingsCancel">Close</button>
+          <button class="primary" id="settingsSave">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid">
+
+    <section class="panel">
+      <h2>Live Power Flow</h2>
+      <div class="hero">
+        <svg class="hero-flow-svg" id="heroFlowSvg" preserveAspectRatio="none"></svg>
+        <div class="node pv tl">
+          <div class="glyph" title="Solar">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+          </div>
+          <div class="body">
+            <div class="lbl">Solar</div>
+            <div class="val" id="n-pv">— kW</div>
+          </div>
+        </div>
+
+        <div class="node grid tr" id="n-grid-box">
+          <div class="glyph" title="Grid">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></svg>
+          </div>
+          <div class="body">
+            <div class="lbl" id="n-grid-lbl">Grid</div>
+            <div class="val" id="n-grid">— kW</div>
+          </div>
+        </div>
+
+        <div class="soc-ring">
+          <svg width="220" height="220" viewBox="0 0 220 220">
+            <circle cx="110" cy="110" r="96" fill="none" stroke="#2a323e" stroke-width="14"/>
+            <circle id="socArc" cx="110" cy="110" r="96" fill="none" stroke="#00d68f" stroke-width="14"
+                    stroke-dasharray="603" stroke-dashoffset="603" stroke-linecap="round"/>
+          </svg>
+          <div class="pct">
+            <div>
+              <div class="big"><span id="soc">—</span><span class="pc">%</span></div>
+              <small>Battery</small>
+            </div>
+          </div>
+        </div>
+
+        <div class="node bat bl">
+          <div class="glyph" title="Battery">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="2" y="7" width="17" height="10" rx="2"/><line x1="21" y1="10" x2="21" y2="14" stroke-linecap="round"/><line x1="6" y1="10" x2="6" y2="14" stroke-linecap="round"/><line x1="10" y1="10" x2="10" y2="14" stroke-linecap="round"/></svg>
+          </div>
+          <div class="body">
+            <div class="lbl" id="n-bat-lbl">Battery</div>
+            <div class="val" id="n-bat">— kW</div>
+          </div>
+        </div>
+
+        <div class="node load br">
+          <div class="glyph" title="Home">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M3 10l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V13h6v9"/></svg>
+          </div>
+          <div class="body">
+            <div class="lbl">Home</div>
+            <div class="val" id="n-load">— kW</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="today-head"><h2>Today</h2><span class="net" id="todayNet"></span></div>
+      <div class="today-wrap">
+        <div class="tiles">
+          <div class="tile pv"><div class="k">Solar gen</div><div class="v" id="t-gen">— kWh</div></div>
+          <div class="tile load"><div class="k">House use</div><div class="v" id="t-load">— kWh</div></div>
+          <div class="tile import"><div class="k">Grid import</div><div class="v" id="t-imp">— kWh</div></div>
+          <div class="tile export"><div class="k">Grid export</div><div class="v" id="t-exp">— kWh</div></div>
+          <div class="tile soc" id="t-soc-tile"><div class="k">Min SoC today <span id="t-soc-time" style="opacity:.6"></span></div><div class="v" id="t-soc">—</div></div>
+          <div class="tile charge"><div class="k">Battery in</div><div class="v" id="t-chg">— kWh</div></div>
+          <div class="tile discharge"><div class="k">Battery out</div><div class="v" id="t-dis">— kWh</div></div>
+        </div>
+        <table class="week-grid" id="weekGrid"></table>
+      </div>
+    </section>
+
+
+  </div>
+
+  <div class="grid-half">
+
+    <section class="panel">
+      <h2>Wholesale Spot Price (<span id="region">—</span>)</h2>
+      <div class="price-now">
+        <div class="v"><span id="priceNow">—</span><span style="font-size:14px;color:var(--muted)"> ¢/kWh now</span></div>
+        <div class="sub">
+          <span id="priceSpot">—</span> $/MWh &nbsp;·&nbsp;
+          next 24h: low <span id="priceMin">—</span> at <span id="priceMinAt">—</span> · high <span id="priceMax">—</span> at <span id="priceMaxAt">—</span>
+        </div>
+      </div>
+      <div class="chart-wrap">
+        <svg class="price-chart" id="chart" viewBox="0 0 600 180" preserveAspectRatio="none"></svg>
+        <div class="chart-tooltip" id="chartTooltip"></div>
+      </div>
+      <div class="price-legend">
+        <span id="chartStart">−6h</span>
+        <span><span style="color:var(--amber)">▍</span> top-up window · <span style="color:var(--green)">▍</span> dump window · now (white)</span>
+        <span id="chartEnd">+18h</span>
+      </div>
+      <div class="hint">AEMO wholesale spot in c/kWh ($/MWh ÷ 10). Highlighted bands show the configured top-up window (10:00–15:00) and dump window (17:30–19:30). Useful for spotting when midday spot drops below ~30 ¢ break-even for grid charging.</div>
+    </section>
+
+    <section class="panel">
+      <h2>Solar Forecast</h2>
+      <div class="price-now">
+        <div class="v"><span id="solarBig">—</span><span style="font-size:14px;color:var(--muted)"> <span id="solarBigLabel">—</span></span></div>
+        <div class="sub" id="solarSub">—</div>
+      </div>
+      <div class="chart-wrap">
+        <svg class="price-chart" id="solarChart" viewBox="0 0 600 180" preserveAspectRatio="none"></svg>
+        <div class="chart-tooltip" id="solarTooltip"></div>
+      </div>
+      <div class="price-legend">
+        <span id="solarStart">−6h</span><span>now</span><span id="solarEnd">+18h</span>
+      </div>
+      <div class="hint">Open-Meteo GTI × systemKw × efficiency. Afternoon skew for NE panels is expected — the calibration panel below shows your actuals vs prediction.</div>
+    </section>
+
+  </div>
+
+  <div class="grid-half" style="margin-top:16px">
+
+    <section class="panel" id="recPanel">
+      <div class="row" style="justify-content:space-between;align-items:baseline;margin-bottom:10px">
+        <h2 style="margin:0">Today's Plan</h2>
+        <div class="row" style="gap:10px;align-items:center">
+          <span class="kv" style="flex-direction:row;gap:6px;align-items:baseline">
+            <span class="k">Updated</span><span class="v small" id="recComputedAt">—</span>
+          </span>
+          <button id="recRefresh">Refresh</button>
+        </div>
+      </div>
+      <div class="price-now">
+        <div class="v" style="font-size:24px"><span id="recHeadline">—</span></div>
+        <div class="sub" id="recSubline" style="margin-top:6px">—</div>
+      </div>
+      <div class="row" style="gap:24px;flex-wrap:wrap;margin-top:12px;align-items:baseline">
+        <div class="kv"><span class="k">Net today</span><span class="v" id="recNet" style="font-size:18px">—</span></div>
+        <div class="kv"><span class="k">Expected dump</span><span class="v small" id="recDumpExpected">—</span></div>
+      </div>
+      <div id="recNarrative" style="margin-top:14px;padding:12px 14px;background:#0a0d11;border-radius:8px;color:var(--text);font-size:13px;line-height:1.55;border-left:3px solid var(--blue)">—</div>
+      <details id="recDetails" style="margin-top:12px">
+        <summary style="cursor:pointer;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.5px;user-select:none">Details</summary>
+        <div class="row" style="gap:24px;flex-wrap:wrap;margin-top:10px">
+          <div class="kv"><span class="k">SoC now</span><span class="v small" id="recSoC">—</span></div>
+          <div class="kv"><span class="k">Usable (above reserve)</span><span class="v small" id="recUsable">—</span></div>
+          <div class="kv"><span class="k">Solar remaining</span><span class="v small" id="recSolar">—</span></div>
+          <div class="kv"><span class="k">Overnight need</span><span class="v small" id="recLoad">—</span></div>
+          <div class="kv"><span class="k">Dump target</span><span class="v small" id="recDump">—</span></div>
+          <div class="kv"><span class="k">Surplus</span><span class="v small" id="recSurplus">—</span></div>
+        </div>
+        <div class="hint" style="margin-top:8px">Read-only advisor — no scheduler changes. Refreshes every 15 min during 10:30–14:30 local.</div>
+      </details>
+    </section>
+
+    <section class="panel battery-controls">
+      <h2>Battery Control</h2>
+
+      <!-- Duration selector (shared by charge & dump) -->
+      <div class="bc-duration">
+        <span class="bc-duration-label">Duration</span>
+        <button class="bc-preset" data-mins="30">30 m</button>
+        <button class="bc-preset active" data-mins="60">1 h</button>
+        <button class="bc-preset" data-mins="90">90 m</button>
+        <button class="bc-preset" data-mins="120">2 h</button>
+        <input type="number" id="customMins" class="bc-custom-mins" placeholder="min" min="5" max="480" title="Custom duration in minutes"/>
+      </div>
+
+      <!-- Action cards -->
+      <div class="bc-cards">
+        <div class="bc-card bc-card-charge">
+          <div class="bc-card-icon">⚡</div>
+          <div class="bc-card-title">Charge from grid</div>
+          <div class="bc-card-desc">Force-charge battery to target SoC at the selected rate.</div>
+          <button id="forceChargeBtn" class="bc-action bc-action-charge">Charge from grid</button>
+        </div>
+        <div class="bc-card bc-card-dump">
+          <div class="bc-card-icon">⬆</div>
+          <div class="bc-card-title">Dump to grid</div>
+          <div class="bc-card-desc">Force-discharge battery to grid down to the reserve SoC.</div>
+          <button id="forceDumpBtn" class="bc-action bc-action-dump">Dump to grid</button>
+        </div>
+      </div>
+
+      <!-- Stop -->
+      <div class="bc-stop-row">
+        <button id="stopForceBtn" class="bc-stop-btn">⬛ Stop / Clear schedule</button>
+        <span style="font-size:11px;color:var(--muted)">Cancels any active force slot and returns to Self-use mode.</span>
+      </div>
+
+      <!-- Parameters -->
+      <div class="bc-params">
+        <div class="bc-param-row">
+          <span class="bc-param-label">Target SoC (charge to)</span>
+          <input type="range" class="slider" id="targetSoc" min="20" max="100" value="90" step="5" />
+          <span id="targetSocVal" style="min-width:40px">90%</span>
+        </div>
+        <div class="bc-param-row">
+          <span class="bc-param-label">Power rate</span>
+          <input type="range" class="slider" id="chargeRate" min="1" max="10.5" value="5" step="0.5" />
+          <span id="chargeRateVal" style="min-width:60px">5.0 kW</span>
+        </div>
+        <div class="bc-param-row">
+          <span class="bc-param-label">Min SoC (reserve)</span>
+          <input type="range" class="slider" id="minSoc" min="10" max="100" value="10" step="5" />
+          <span id="minSocVal" style="min-width:40px">10%</span>
+          <button id="applyMinSoc">Apply</button>
+        </div>
+      </div>
+
+      <div class="log" id="log">Ready. Click ⚙ Settings to enter your Fox ESS API key, then press Refresh.</div>
+      <button id="diagnoseBtn" class="bc-diagnose">⚙ Diagnose scheduler</button>
+    </section>
+
+  </div>
+
+  <section class="panel" style="margin-top:16px">
+    <h2>Scheduler Status</h2>
+    <div class="row" style="justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px">
+      <div class="kv"><span class="k">Scheduler</span><span class="v small" id="schedEnable">—</span></div>
+      <div class="kv" style="flex:1;min-width:260px"><span class="k">Active now</span><span class="v small" id="schedActive">—</span></div>
+      <button id="refreshSched">Refresh</button>
+    </div>
+    <table class="sched-table" id="schedTable"></table>
+    <div class="hint" style="margin-top:8px">Use <b>Stop / Clear schedule</b> above to clear all forced charge/discharge slots and return the battery to Self-use.</div>
+  </section>
+
+  <section class="panel" style="margin-top:16px">
+    <div class="row" style="justify-content:space-between;align-items:baseline;margin-bottom:10px">
+      <h2 style="margin:0">Solar Calibration</h2>
+      <div class="row" style="gap:10px">
+        <label style="color:var(--muted);font-size:12px">Days
+          <select id="calibDays" style="margin-left:6px">
+            <option value="7">7</option>
+            <option value="14" selected>14</option>
+            <option value="21">21</option>
+            <option value="30">30</option>
+          </select>
+        </label>
+        <button id="calibRefresh">Refresh</button>
+      </div>
+    </div>
+    <div class="row" style="gap:24px;flex-wrap:wrap;margin-bottom:10px">
+      <div class="kv"><span class="k">Current efficiency</span><span class="v small" id="calibCurrent">—</span></div>
+      <div class="kv"><span class="k">Suggested</span><span class="v small" id="calibSuggested">—</span></div>
+      <div class="kv"><span class="k">Sample days</span><span class="v small" id="calibCount">—</span></div>
+      <div style="flex:1"></div>
+      <button class="primary" id="calibApply" disabled>Apply suggested</button>
+    </div>
+    <table class="sched-table" id="calibTable"></table>
+    <div class="hint" style="margin-top:10px">Compares Fox daily generation totals against Open-Meteo's tilted-irradiance model (GTI × systemKw). Days with zero production or obvious clipping/outages show &lt; 0.5 or null and are excluded from the average.</div>
+  </section>
+
+  <!-- Deploy stamp — shown at bottom, not cluttering the header -->
+  <footer style="margin-top:36px;padding:14px 0 4px;border-top:1px solid var(--line);display:flex;justify-content:center">
+    <span id="deployStamp" style="font-size:11px;color:var(--muted);opacity:.45;font-variant-numeric:tabular-nums" title="Server boot time — bumps on every docker rebuild">—</span>
+  </footer>
+
+</div>
+
+<script>
+// ---------- tiny helpers ----------
+const $ = (id) => document.getElementById(id);
+const fmtKw = (w) => (w == null ? '—' : (w >= 0 ? '+' : '') + (w / 1).toFixed(2) + ' kW');
+const fmtKwh = (v) => (v == null ? '—' : v.toFixed(1) + ' kWh');
+// Format a Date as 24h HH:MM, prefixed with "tomorrow" (or weekday) if it's a different day.
+function fmtWhen(d) {
+  const now = new Date();
+  const hm = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+  const dayDiff = Math.floor((d - new Date(now.getFullYear(), now.getMonth(), now.getDate())) / 86400000);
+  if (dayDiff === 0) return hm;
+  if (dayDiff === 1) return `tomorrow ${hm}`;
+  return `${d.toLocaleDateString([], { weekday: 'short' })} ${hm}`;
+}
+
+function log(msg, cls = '') {
+  const el = $('log');
+  const row = document.createElement('div');
+  row.className = cls;
+  row.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  el.prepend(row);
+  while (el.childNodes.length > 50) el.removeChild(el.lastChild);
+}
+
+function setStatus(ok, text) {
+  $('dot').className = 'dot ' + (ok === true ? 'ok' : ok === false ? 'err' : '');
+  if (text) $('updated').textContent = text;
+}
+
+async function api(path, body) {
+  const opts = { method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json' } };
+  const pw = sessionStorage.getItem('adminPw');
+  if (pw) opts.headers['X-Admin-Password'] = pw;
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(path, opts);
+  const txt = await r.text();
+  let parsed; try { parsed = JSON.parse(txt); } catch { parsed = { raw: txt }; }
+  if (r.status === 401 && parsed && parsed.needAdmin) {
+    // Write attempted while locked — surface to the UI layer.
+    parsed.__needAdmin = true;
+  }
+  return parsed;
+}
+
+// ---------- config ----------
+let cfg = { aemoRegion: 'VIC1', pollSeconds: 60, todayPollSeconds: 600, schedulerPollSeconds: 300, pricePollSeconds: 120 };
+
+// ---------- TOU + retail markup ----------
+// "hours" string is comma-separated ranges like "07-15,20-22". Hours are local.
+// A number h matches a range "a-b" if a<=b && a<=h<b, OR if a>b && (h>=a || h<b) (wrap).
+function hourInRange(h, range) {
+  const [aS, bS] = range.split('-');
+  const a = Number(aS), b = Number(bS);
+  return a <= b ? (h >= a && h < b) : (h >= a || h < b);
+}
+function hourInHoursStr(h, hoursStr) {
+  return hoursStr.split(',').some((r) => hourInRange(h, r.trim()));
+}
+function touBlockFor(date) {
+  const tou = cfg.flowPowerMarkup?.tou;
+  if (!tou) return { name: 'n/a', flat: 0 };
+  const h = date.getHours();
+  const isWeekend = date.getDay() === 0 || date.getDay() === 6;
+  // Weekends: treat whole day as off-peak (common VIC convention).
+  if (isWeekend) return { name: 'off-peak (weekend)', flat: tou.offPeak.flatCentsPerKwh };
+  if (tou.peak && hourInHoursStr(h, tou.peak.hours)) return { name: 'peak', flat: tou.peak.flatCentsPerKwh };
+  if (tou.shoulder && hourInHoursStr(h, tou.shoulder.hours)) return { name: 'shoulder', flat: tou.shoulder.flatCentsPerKwh };
+  return { name: 'off-peak', flat: tou.offPeak.flatCentsPerKwh };
+}
+// Spot in $/MWh → retail c/kWh (inc. GST)
+function spotToRetail(spotMwh, date) {
+  const mk = cfg.flowPowerMarkup;
+  if (!mk) return spotMwh / 10;
+  const spotC = spotMwh / 10;
+  const { flat } = touBlockFor(date);
+  return (spotC * mk.lossFactor + flat) * (1 + mk.gstRate);
+}
+
+// ---------- fox ESS ----------
+const REAL_VARS = [
+  'pvPower', 'SoC', 'soc', 'feedinPower', 'gridConsumptionPower',
+  'loadsPower', 'generationPower',
+  'batChargePower', 'batDischargePower',
+  'invBatPower', 'batPower', 'meterPower2',
+];
+const REPORT_VARS = ['generation', 'loads', 'feedin', 'gridConsumption', 'chargeEnergyToTal', 'dischargeEnergyToTal'];
+
+function pickVal(datas, name) {
+  if (!datas) return null;
+  const d = datas.find((x) => x.variable === name);
+  return d ? Number(d.value) : null;
+}
+
+async function loadLive() {
+  const r = await api('/api/fox/op/v0/device/real/query', { variables: REAL_VARS });
+  if (r.errno !== 0) { log('Fox real-time error: ' + (r.msg || JSON.stringify(r)), 'err'); setStatus(false); return; }
+  const datas = r.result?.[0]?.datas;
+  if (!datas) { log('Unexpected real-time payload: ' + JSON.stringify(r).slice(0, 200), 'err'); return; }
+
+  const pv = pickVal(datas, 'pvPower') ?? pickVal(datas, 'generationPower') ?? 0;
+  const soc = pickVal(datas, 'SoC') ?? pickVal(datas, 'soc');
+  const feedin = pickVal(datas, 'feedinPower') ?? 0;
+  const gridIn = pickVal(datas, 'gridConsumptionPower') ?? 0;
+  const load = pickVal(datas, 'loadsPower') ?? 0;
+
+  // Battery: prefer split charge/discharge variables; fall back to signed invBatPower /
+  // batPower (positive = charging, negative = discharging on Fox hybrids).
+  const batChg = pickVal(datas, 'batChargePower');
+  const batDis = pickVal(datas, 'batDischargePower');
+  let batNet;
+  if (batChg != null || batDis != null) {
+    batNet = (batChg ?? 0) - (batDis ?? 0);
+  } else {
+    batNet = pickVal(datas, 'invBatPower') ?? pickVal(datas, 'batPower') ?? 0;
+  }
+
+  // Grid: positive = import, negative = export
+  const gridNet = gridIn - feedin;
+
+  $('n-pv').textContent = pv.toFixed(2) + ' kW';
+  $('n-load').textContent = load.toFixed(2) + ' kW';
+  $('n-grid').textContent = Math.abs(gridNet).toFixed(2) + ' kW';
+  $('n-grid-lbl').textContent = gridNet >= 0 ? 'Grid (import)' : 'Grid (export)';
+  $('n-grid-box').classList.toggle('exporting', gridNet < 0);
+  $('n-bat').textContent = Math.abs(batNet).toFixed(2) + ' kW';
+  $('n-bat-lbl').textContent = batNet > 0 ? 'Battery (charging)' : batNet < 0 ? 'Battery (discharging)' : 'Battery';
+
+  if (soc != null) {
+    $('soc').textContent = Math.round(soc);
+    const circ = 2 * Math.PI * 96;
+    $('socArc').setAttribute('stroke-dasharray', circ);
+    $('socArc').setAttribute('stroke-dashoffset', circ * (1 - soc / 100));
+    $('socArc').setAttribute('stroke', soc < 20 ? '#ff4d4d' : soc < 40 ? '#ffb020' : '#00d68f');
+  }
+
+  heroFlow = { pv, gridNet, batNet, load };
+  drawHeroFlow();
+  setStatus(true, 'updated ' + new Date().toLocaleTimeString());
+}
+
+let todayHourlyGen = []; // 24 values — actual PV generation per hour today (kWh)
+
+async function loadToday() {
+  const d = new Date();
+  const body = {
+    year: d.getFullYear(), month: d.getMonth() + 1, day: d.getDate(),
+    dimension: 'day', variables: REPORT_VARS,
+  };
+  const r = await api('/api/fox/op/v0/device/report/query', body);
+  if (r.errno !== 0) return;
+  const rows = r.result || [];
+  const sum = (name) => {
+    const row = rows.find((x) => x.variable === name);
+    if (!row || !row.values) return null;
+    return row.values.reduce((a, b) => a + (Number(b) || 0), 0);
+  };
+  $('t-gen').textContent = fmtKwh(sum('generation'));
+  $('t-load').textContent = fmtKwh(sum('loads'));
+  $('t-imp').textContent = fmtKwh(sum('gridConsumption'));
+  $('t-exp').textContent = fmtKwh(sum('feedin'));
+  $('t-chg').textContent = fmtKwh(sum('chargeEnergyToTal'));
+  $('t-dis').textContent = fmtKwh(sum('dischargeEnergyToTal'));
+
+  // PV-only hourly — derived from the energy balance because Fox's `generation`
+  // variable is total AC output (PV + battery discharge). Correct formula:
+  //   PV = generation + chargeEnergyToTal − dischargeEnergyToTal
+  // Logic: `generation` is what the inverter pushed to AC (some of which is
+  // battery discharge); `charge` is PV that went straight into the battery and
+  // therefore isn't counted in `generation`; `discharge` is battery energy
+  // that showed up in `generation` but didn't come from the sun.
+  const hourly = (name) => {
+    const row = rows.find((x) => x.variable === name);
+    return (row?.values || []).map((v) => Number(v) || 0);
+  };
+  // Prefer a direct PV variable if the firmware supports one. Fall back to an
+  // energy-balance derivation from generation/charge/discharge.
+  const PV_CANDIDATES = ['pvEnergyTotal', 'pvEnergyTotalSum', 'pv1EnergyTotal', 'pvPower', 'input'];
+  let pvDirect = null;
+  for (const name of PV_CANDIDATES) {
+    const row = rows.find((x) => x.variable === name);
+    if (row?.values && row.values.some((v) => Number(v) > 0.01)) { pvDirect = row; break; }
+  }
+  if (pvDirect) {
+    todayHourlyGen = pvDirect.values.map((v) => Number(v) || 0);
+    log(`solar: using direct variable "${pvDirect.variable}" for PV.`, 'ok');
+  } else {
+    // Derived formula: PV = max(0, generation − discharge) + charge.
+    // `generation` can include battery-to-AC flow; subtracting `discharge` removes
+    // that while keeping the PV-to-AC portion. Adding `charge` recovers PV that
+    // went straight to the battery (DC-coupled) and isn't in `generation`.
+    const gen = hourly('generation');
+    const chg = hourly('chargeEnergyToTal');
+    const dis = hourly('dischargeEnergyToTal');
+    const len = Math.max(gen.length, chg.length, dis.length);
+    todayHourlyGen = Array.from({ length: len }, (_, i) =>
+      Math.max(0, (gen[i] || 0) - (dis[i] || 0)) + (chg[i] || 0)
+    );
+  }
+  // Also update today totals tiles to use the derived PV total (more accurate)
+  const derivedPvToday = todayHourlyGen.reduce((a, b) => a + b, 0);
+  if (derivedPvToday > 0) $('t-gen').textContent = fmtKwh(derivedPvToday);
+  if (solarForecast.length) drawSolarChart();
+}
+
+// ---------- AEMO prices ----------
+let priceSeries = []; // [{t: Date, price: $/MWh, type: 'now'|'forecast'}]
+
+async function loadPrices() {
+  const [cur, fc, hist] = await Promise.all([
+    api('/api/aemo/current'),
+    api('/api/aemo/forecast'),
+    api('/api/aemo/history'),
+  ]);
+
+  // Current: ELEC_NEM_SUMMARY returns array with REGIONID & PRICE
+  const curArr = Array.isArray(cur) ? cur : (cur.ELEC_NEM_SUMMARY || cur.data || []);
+  const mine = curArr.find((x) => (x.REGIONID || x.regionid) === cfg.aemoRegion);
+  const curPrice = mine ? Number(mine.PRICE ?? mine.price ?? mine.RRP) : null;
+  const curTs = mine ? new Date(mine.SETTLEMENTDATE || mine.settlementdate || Date.now()) : new Date();
+
+  const toPts = (arr, type) => (Array.isArray(arr) ? arr : [])
+    .filter((x) => (x.REGIONID || x.regionid) === cfg.aemoRegion)
+    .map((x) => ({
+      t: new Date(x.DATETIME || x.datetime || x.SETTLEMENTDATE),
+      price: Number(x.RRP ?? x.rrp ?? x.PRICE),
+      type,
+    }))
+    .filter((x) => !isNaN(x.t.getTime()) && !isNaN(x.price))
+    .sort((a, b) => a.t - b.t);
+
+  const nowMs = Date.now();
+  // 24h window: -6h history + 18h forecast. Tighter than the solar chart's
+  // sunrise→sunset window because the price chart is about *now-ish* decisions.
+  const winStart = nowMs - 6 * 3600_000;
+  const winEnd = nowMs + 18 * 3600_000;
+  const history = toPts(hist, 'history').filter((x) => x.t.getTime() >= winStart && x.t.getTime() < nowMs);
+  const forecasts = toPts(fc, 'forecast').filter((x) => x.t.getTime() >= nowMs && x.t.getTime() <= winEnd);
+
+  priceSeries = [...history];
+  if (curPrice != null) priceSeries.push({ t: curTs, price: curPrice, type: 'now' });
+  priceSeries.push(...forecasts);
+
+  if (priceSeries.length === 0) { log('No AEMO price data returned.', 'err'); return; }
+
+  // Spot in c/kWh per point. Retain `retail` for any other consumers but the
+  // chart now focuses purely on wholesale.
+  priceSeries.forEach((p) => { p.spotCents = p.price / 10; p.retail = spotToRetail(p.price, p.t); });
+
+  // The "now" headline should reflect actual current price, not priceSeries[0]
+  // (which is the oldest history point). Prefer the 'now' type, fall back to the
+  // newest history point.
+  const nowPoint = priceSeries.find((p) => p.type === 'now')
+    || priceSeries.slice().reverse().find((p) => p.type === 'history')
+    || priceSeries[0];
+  $('region').textContent = cfg.aemoRegion;
+  $('priceNow').textContent = nowPoint.spotCents.toFixed(1);
+  $('priceSpot').textContent = nowPoint.price.toFixed(0);
+
+  // Min/max in next 24h (forecasts only) — by spot, not retail.
+  const upcoming = priceSeries.filter((p) => p.type === 'forecast');
+  if (upcoming.length) {
+    const min = upcoming.reduce((m, x) => (x.spotCents < m.spotCents ? x : m), upcoming[0]);
+    const max = upcoming.reduce((m, x) => (x.spotCents > m.spotCents ? x : m), upcoming[0]);
+    $('priceMin').textContent = min.spotCents.toFixed(1) + '¢';
+    $('priceMinAt').textContent = fmtWhen(min.t);
+    $('priceMax').textContent = max.spotCents.toFixed(1) + '¢';
+    $('priceMaxAt').textContent = fmtWhen(max.t);
+  }
+
+  drawChart();
+}
+
+function retailColour(c) {
+  if (c < 0)  return '#3ea6ff'; // negative (rare)
+  if (c < 12) return '#00f2a1'; // cheap — grab it
+  if (c < 22) return '#00d68f'; // normal
+  if (c < 32) return '#ffb020'; // elevated
+  return '#ff4d4d';             // expensive
+}
+
+// ---------- hero flow lines ----------
+// Draws animated dashed lines from each corner card to the SoC ring, with direction
+// (forward vs reverse dash animation) matching actual power flow.
+let heroFlow = { pv: 0, gridNet: 0, batNet: 0, load: 0 };
+
+function drawHeroFlow() {
+  const hero = document.querySelector('.hero');
+  const svg = $('heroFlowSvg');
+  if (!hero || !svg) return;
+
+  const heroRect = hero.getBoundingClientRect();
+  if (heroRect.width === 0) return;
+  const ringEl = hero.querySelector('.soc-ring');
+  if (!ringEl) return;
+  const rr = ringEl.getBoundingClientRect();
+
+  // Use hero's own coordinate system so the SVG scales with it.
+  svg.setAttribute('viewBox', `0 0 ${heroRect.width} ${heroRect.height}`);
+  const rx = (rr.left + rr.right) / 2 - heroRect.left;
+  const ry = (rr.top + rr.bottom) / 2 - heroRect.top;
+  const radius = rr.width / 2;
+
+  const corners = [
+    { sel: '.node.pv',   key: 'pv',   colour: 'var(--amber)' },
+    { sel: '.node.grid', key: 'grid', colour: heroFlow.gridNet < 0 ? 'var(--green)' : 'var(--red)' },
+    { sel: '.node.bat',  key: 'bat',  colour: 'var(--purple)' },
+    { sel: '.node.load', key: 'load', colour: 'var(--blue)' },
+  ];
+
+  // Power + direction per line. Direction is "forward" when flowing corner→ring.
+  // reverse = ring→corner.
+  const flowSpec = {
+    pv:   { power: heroFlow.pv,               reverse: false },            // PV always → ring
+    load: { power: heroFlow.load,             reverse: true },             // ring → home
+    grid: { power: Math.abs(heroFlow.gridNet), reverse: heroFlow.gridNet < 0 }, // export → reverse
+    bat:  { power: Math.abs(heroFlow.batNet),  reverse: heroFlow.batNet > 0 },  // charging → reverse
+  };
+
+  let html = '';
+  corners.forEach((c) => {
+    const el = hero.querySelector(c.sel);
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    // start at the inner edge of the card (side closest to ring)
+    const innerLeft = c.key === 'pv' || c.key === 'bat';
+    const cx = (innerLeft ? r.right : r.left) - heroRect.left;
+    const cy = (r.top + r.bottom) / 2 - heroRect.top;
+    // end at ring edge along the line direction
+    const dx = rx - cx, dy = ry - cy;
+    const len = Math.hypot(dx, dy) || 1;
+    const ex = rx - (dx / len) * radius;
+    const ey = ry - (dy / len) * radius;
+
+    const spec = flowSpec[c.key];
+    const active = spec.power > 0.05;
+    const stroke = active ? c.colour : '#2a323e';
+    const width = active ? 3 : 2;
+    const classes = ['flow-line'];
+    if (active) classes.push('active');
+    if (active && spec.reverse) classes.push('reverse');
+    html += `<line x1="${cx}" y1="${cy}" x2="${ex}" y2="${ey}" stroke="${stroke}" stroke-width="${width}" stroke-linecap="round" stroke-dasharray="${active ? '8 6' : ''}" class="${classes.join(' ')}"/>`;
+  });
+  svg.innerHTML = html;
+}
+
+window.addEventListener('resize', () => drawHeroFlow());
+
+// ---------- solar forecast + battery projection ----------
+let solarForecast = []; // [{t: Date, predictedKw, gti, cloud}]
+let sunrises = []; // [{date: 'YYYY-MM-DD', t: Date}]
+let sunsets  = [];
+
+// Shared chart window: today's sunrise → tomorrow's sunset. Used by both price
+// and solar charts so the synced cursor maps 1:1 between them.
+function chartWindow() {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
+  const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const rise = sunrises.find((s) => s.date === ymd(today))?.t;
+  const set  = sunsets.find((s) => s.date === ymd(tomorrow))?.t;
+  // Fallbacks: 06:00 today, 20:00 tomorrow
+  const start = rise || new Date(today.getTime() + 6 * 3600_000);
+  const end   = set  || new Date(tomorrow.getTime() + 20 * 3600_000);
+  return { start, end };
+}
+
+async function loadSolar() {
+  const r = await api('/api/solar');
+  if (!r.points) { log('solar forecast failed: ' + (r.error || 'unknown'), 'err'); return; }
+  // Open-Meteo returns naive local-time ISO strings (no TZ). Parse as local.
+  solarForecast = r.points.map((p) => ({
+    t: new Date(p.t.replace(' ', 'T')),
+    predictedKw: p.predictedKw,
+    gti: p.gti,
+    cloud: p.cloud,
+  })).filter((p) => !isNaN(p.t.getTime()));
+  sunrises = (r.sunrises || []).map((s) => ({ date: s.date, t: new Date(s.time.replace(' ', 'T')) }));
+  sunsets  = (r.sunsets  || []).map((s) => ({ date: s.date, t: new Date(s.time.replace(' ', 'T')) }));
+
+  // Today's predicted total (midnight to midnight local)
+  const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+  const todayEnd = new Date(todayStart); todayEnd.setDate(todayEnd.getDate() + 1);
+  const tomorrowEnd = new Date(todayEnd); tomorrowEnd.setDate(tomorrowEnd.getDate() + 1);
+  const todayPts = solarForecast.filter((p) => p.t >= todayStart && p.t < todayEnd);
+  const tmrwPts  = solarForecast.filter((p) => p.t >= todayEnd   && p.t < tomorrowEnd);
+  const todayPredKwh = todayPts.reduce((a, p) => a + p.predictedKw, 0);
+  const tmrwPredKwh  = tmrwPts.reduce((a, p) => a + p.predictedKw, 0);
+
+  // Stash totals for the headline function to use.
+  solarDailyTotals = { todayPredKwh, tmrwPredKwh };
+  updateSolarHeadline();
+  drawSolarChart();
+  await projectAt1730();
+}
+
+let solarDailyTotals = { todayPredKwh: 0, tmrwPredKwh: 0 };
+let projectedSocAtSunset = null; // filled by projectAt1730 for use in headline sub-line
+
+// Peak predicted kW + time, for a given calendar day.
+function peakInDay(day) {
+  const start = new Date(day); start.setHours(0, 0, 0, 0);
+  const end = new Date(start); end.setDate(end.getDate() + 1);
+  let best = { kw: 0, t: null };
+  solarForecast.forEach((p) => {
+    if (p.t >= start && p.t < end && p.predictedKw > best.kw) best = { kw: p.predictedKw, t: p.t };
+  });
+  return best;
+}
+
+function updateSolarHeadline() {
+  const now = new Date();
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
+  const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const riseToday = sunrises.find((s) => s.date === ymd(today))?.t;
+  const setToday  = sunsets.find((s) => s.date === ymd(today))?.t;
+  const riseTomorrow = sunrises.find((s) => s.date === ymd(tomorrow))?.t;
+
+  const actualToday = todayHourlyGen.reduce((a, b) => a + b, 0);
+  const predToday = solarDailyTotals.todayPredKwh || 0;
+  const predTmrw  = solarDailyTotals.tmrwPredKwh  || 0;
+  const pct = predToday > 0 ? Math.round((actualToday / predToday) * 100) : null;
+  const peakToday = peakInDay(today);
+  const peakTmrw  = peakInDay(tomorrow);
+
+  const fmtT = (d) => d ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : '—';
+  const sunsetBuffer = setToday ? new Date(setToday.getTime() - 30 * 60000) : null; // 30 min before sunset "past peak"
+
+  let big, bigLabel, sub;
+
+  if (!riseToday || now < riseToday) {
+    // Pre-dawn — forecast for the day ahead.
+    big = predToday.toFixed(1);
+    bigLabel = 'kWh expected today';
+    sub = `peak ${peakToday.kw.toFixed(1)} kW at ${fmtT(peakToday.t)} · sunrise ${fmtT(riseToday)} · tomorrow ${predTmrw.toFixed(0)} kWh`;
+  } else if (setToday && now < sunsetBuffer) {
+    // Daytime — progress so far.
+    big = actualToday.toFixed(1);
+    bigLabel = `kWh so far${predToday > 0 ? ` of ${predToday.toFixed(0)}` : ''}`;
+    const pctStr = pct != null ? `${pct}% of forecast` : '';
+    const socStr = projectedSocAtSunset != null ? ` · SoC at sunset: ${Math.round(projectedSocAtSunset)}%` : '';
+    sub = `${pctStr} · peak predicted ${peakToday.kw.toFixed(1)} kW at ${fmtT(peakToday.t)}${socStr}`;
+  } else {
+    // Post-sunset — tomorrow outlook.
+    big = predTmrw.toFixed(1);
+    bigLabel = 'kWh expected tomorrow';
+    const finalPct = pct != null ? ` (${pct}%)` : '';
+    sub = `today finished ${actualToday.toFixed(1)} / ${predToday.toFixed(0)} kWh${finalPct} · sunrise ${fmtT(riseTomorrow)} · peak ${peakTmrw.kw.toFixed(1)} kW`;
+  }
+
+  $('solarBig').textContent = big;
+  $('solarBigLabel').textContent = bigLabel;
+  $('solarSub').textContent = sub;
+}
+
+function drawSolarChart() {
+  const svg = $('solarChart');
+  const W = 600, H = 180, PAD = 22;
+  svg.innerHTML = '';
+  if (solarForecast.length === 0) return;
+
+  // Shared window: today sunrise → tomorrow sunset.
+  const win = chartWindow();
+  const from = win.start.getTime();
+  const to = win.end.getTime();
+  const now = Date.now();
+  const pts = solarForecast.filter((p) => p.t.getTime() >= from && p.t.getTime() <= to);
+  if (pts.length === 0) return;
+
+  // y-axis scale: cap at rated systemKw so bar heights feel meaningful
+  const hi = Math.max(1, ...pts.map((p) => p.predictedKw));
+  const xStep = (W - PAD * 2) / pts.length;
+  const zeroY = H - PAD;
+
+  svg.innerHTML += `<line x1="${PAD}" y1="${zeroY}" x2="${W - PAD}" y2="${zeroY}" stroke="#2a323e"/>`;
+
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
+  const maxForChart = Math.max(hi, ...(todayHourlyGen || []));
+
+  pts.forEach((p, i) => {
+    const predH = (p.predictedKw / maxForChart) * (H - PAD * 2);
+    const x = PAD + i * xStep;
+    const w = Math.max(1, xStep - 1);
+    const isPast = p.t.getTime() < now;
+    const isToday = p.t >= today && p.t < tomorrow;
+
+    // Look up this hour's actual generation from the today report (kWh == kW for 1h bar).
+    let actualKw = null;
+    if (isToday && isPast && todayHourlyGen.length === 24) {
+      actualKw = todayHourlyGen[p.t.getHours()];
+    }
+
+    const tLabel = fmtWhen(p.t);
+    // Back layer: predicted. Translucent if past (actual will overlay), opaque if future.
+    const predFill = p.predictedKw < 0.5 ? '#2a323e' : '#ffe066';
+    const predOpacity = isPast ? 0.3 : 0.9;
+    svg.innerHTML += `<rect x="${x}" y="${zeroY - predH}" width="${w}" height="${predH}" fill="${predFill}" opacity="${predOpacity}" data-when="${tLabel}" data-kw="${p.predictedKw.toFixed(2)}" data-actual="${actualKw != null ? actualKw.toFixed(2) : ''}" data-cloud="${p.cloud ?? '—'}"></rect>`;
+
+    // Front layer: actual (solid, bright amber) over the prediction for past hours today.
+    if (actualKw != null && actualKw > 0.05) {
+      const actH = (actualKw / maxForChart) * (H - PAD * 2);
+      svg.innerHTML += `<rect x="${x}" y="${zeroY - actH}" width="${w}" height="${actH}" fill="#ffb020" opacity="0.95" data-when="${tLabel}" data-kw="${p.predictedKw.toFixed(2)}" data-actual="${actualKw.toFixed(2)}" data-cloud="${p.cloud ?? '—'}"></rect>`;
+    }
+  });
+  svg.innerHTML += `<text x="${W - PAD}" y="${PAD}" text-anchor="end" fill="#8a94a3" font-size="10">${maxForChart.toFixed(1)} kW</text>`;
+
+  if (pts[0]) $('solarStart').textContent = fmtWhen(pts[0].t);
+  if (pts[pts.length - 1]) $('solarEnd').textContent = fmtWhen(pts[pts.length - 1].t);
+}
+
+// Simple projection: starting from current SoC, apply (solar − avgLoad) per hour.
+// When battery would exceed capacity, excess exports (doesn't raise SoC).
+// When battery would hit 0, shortfall comes from grid (doesn't drop SoC below 0).
+// Project SoC from now to today's sunset (while there's still solar to project).
+// Stores the result in `projectedSocAtSunset` for the headline sub-line to read.
+async function projectAt1730() {
+  projectedSocAtSunset = null;
+  try {
+    const d = new Date();
+    const today = new Date(d); today.setHours(0, 0, 0, 0);
+    const ymd = (x) => `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
+    const sunsetToday = sunsets.find((s) => s.date === ymd(today))?.t;
+    // If no sunset data or already past sunset, skip — no projection needed.
+    if (!sunsetToday || d >= sunsetToday) { updateSolarHeadline(); return; }
+
+    const rt = await api('/api/fox/op/v0/device/real/query', { variables: ['SoC', 'soc'] });
+    const datas = rt.result?.[0]?.datas || [];
+    const soc = pickVal(datas, 'SoC') ?? pickVal(datas, 'soc');
+    if (soc == null) return;
+
+    const rep = await api('/api/fox/op/v0/device/report/query', {
+      year: d.getFullYear(), month: d.getMonth() + 1, day: d.getDate(),
+      dimension: 'day', variables: ['loads'],
+    });
+    const loadsRow = (rep.result || []).find((x) => x.variable === 'loads');
+    const loadsUntilNow = loadsRow?.values?.slice(0, d.getHours() + 1).reduce((a, b) => a + (Number(b) || 0), 0) || 0;
+    const hoursElapsed = Math.max(0.5, d.getHours() + d.getMinutes() / 60);
+    const avgLoadKw = loadsUntilNow / hoursElapsed;
+
+    const capacity = cfg.battery?.capacityKwh || 42;
+    let socPct = soc;
+    let t = new Date(d);
+    while (t < sunsetToday) {
+      const nextBoundary = new Date(t);
+      nextBoundary.setMinutes(0, 0, 0);
+      nextBoundary.setHours(t.getHours() + 1);
+      const stepEnd = nextBoundary < sunsetToday ? nextBoundary : sunsetToday;
+      const dtHours = (stepEnd - t) / 3600000;
+      const hourT = new Date(t); hourT.setMinutes(0, 0, 0);
+      const fp = solarForecast.find((p) => p.t.getTime() === hourT.getTime());
+      const solarKw = fp ? fp.predictedKw : 0;
+      const netKw = solarKw - avgLoadKw;
+      const deltaKwh = netKw * dtHours;
+      const currentKwh = (socPct / 100) * capacity;
+      const newKwh = Math.max(0, Math.min(capacity, currentKwh + deltaKwh));
+      socPct = (newKwh / capacity) * 100;
+      t = stepEnd;
+    }
+    projectedSocAtSunset = socPct;
+    updateSolarHeadline();
+  } catch (e) { log('projection failed: ' + e.message, 'err'); }
+}
+
+function drawChart() {
+  const svg = $('chart');
+  const W = 600, H = 180, PAD = 22;
+  svg.innerHTML = '';
+  if (priceSeries.length === 0) return;
+
+  const spotVals = priceSeries.map((p) => p.spotCents);
+  let lo = Math.min(0, ...spotVals);
+  let hi = Math.max(...spotVals, 20);
+  if (hi === lo) hi = lo + 1;
+  // Add 10% headroom so peaks aren't clipped against the top edge.
+  const range = hi - lo;
+  hi += range * 0.08;
+  lo -= range * 0.04;
+
+  const xStep = (W - PAD * 2) / priceSeries.length;
+  const yFor = (c) => H - PAD - ((c - lo) / (hi - lo)) * (H - PAD * 2);
+
+  // --- Window bands (drawn first so they sit behind the line) ---
+  // Find slice ranges where the sample's local time falls inside each window.
+  function inLocalRange(date, startMin, endMin) {
+    const m = date.getHours() * 60 + date.getMinutes();
+    return m >= startMin && m < endMin;
+  }
+  function bandFor(predicate, fill) {
+    let runStart = -1;
+    for (let i = 0; i <= priceSeries.length; i++) {
+      const inside = i < priceSeries.length && predicate(priceSeries[i].t);
+      if (inside && runStart < 0) runStart = i;
+      else if (!inside && runStart >= 0) {
+        const x1 = PAD + runStart * xStep;
+        const x2 = PAD + i * xStep;
+        svg.innerHTML += `<rect x="${x1}" y="${PAD}" width="${x2 - x1}" height="${H - PAD * 2}" fill="${fill}" />`;
+        runStart = -1;
+      }
+    }
+  }
+  bandFor((t) => inLocalRange(t, 10 * 60, 15 * 60), 'rgba(255, 176, 32, 0.10)');     // top-up search 10:00-15:00
+  bandFor((t) => inLocalRange(t, 17 * 60 + 30, 19 * 60 + 30), 'rgba(0, 214, 143, 0.14)'); // dump 17:30-19:30
+
+  // --- Y-axis grid + zero line ---
+  const zeroY = yFor(0);
+  if (lo < 0 && hi > 0) {
+    svg.innerHTML += `<line x1="${PAD}" y1="${zeroY}" x2="${W - PAD}" y2="${zeroY}" stroke="#2a323e" stroke-dasharray="3,4"/>`;
+  }
+  const step = range > 60 ? 20 : range > 30 ? 10 : 5;
+  for (let y = Math.ceil(lo / step) * step; y <= hi; y += step) {
+    if (y === 0) continue;
+    const py = yFor(y);
+    svg.innerHTML += `<line x1="${PAD}" y1="${py}" x2="${W - PAD}" y2="${py}" stroke="#1f2630"/>`;
+    svg.innerHTML += `<text x="${PAD}" y="${py - 2}" fill="#8a94a3" font-size="10">${y}¢</text>`;
+  }
+
+  // --- Spot polyline ---
+  const spotPath = priceSeries.map((p, i) => {
+    const x = PAD + i * xStep + xStep / 2;
+    return `${x.toFixed(1)},${yFor(p.spotCents).toFixed(1)}`;
+  }).join(' ');
+  svg.innerHTML += `<polyline points="${spotPath}" fill="none" stroke="#3ea6ff" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>`;
+
+  // --- Min / max / now markers on the line ---
+  const futureVals = priceSeries.map((p, i) => (p.type === 'forecast' ? { v: p.spotCents, i, t: p.t } : null)).filter(Boolean);
+  const minIdx = futureVals.length ? futureVals.reduce((m, x) => (x.v < m.v ? x : m)).i : -1;
+  const maxIdx = futureVals.length ? futureVals.reduce((m, x) => (x.v > m.v ? x : m)).i : -1;
+  const nowIdx = priceSeries.findIndex((p) => p.type === 'now');
+  function dot(i, fill, r = 3) {
+    if (i < 0) return;
+    const cx = PAD + i * xStep + xStep / 2;
+    const cy = yFor(priceSeries[i].spotCents);
+    svg.innerHTML += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${fill}" stroke="#0f1216" stroke-width="1"/>`;
+  }
+  dot(minIdx, '#00f2a1');
+  dot(maxIdx, '#ff6a6a');
+  dot(nowIdx, '#ffffff', 4);
+
+  // --- Hover hit-rects (transparent, capture data attrs for the tooltip) ---
+  priceSeries.forEach((p, i) => {
+    const x = PAD + i * xStep;
+    const w = Math.max(1, xStep);
+    svg.innerHTML += `<rect x="${x}" y="${PAD}" width="${w}" height="${H - PAD * 2}" fill="transparent" data-when="${fmtWhen(p.t)}" data-retail="${p.spotCents.toFixed(1)}" data-spot="${p.price.toFixed(0)}" data-tou="${touBlockFor(p.t).name}"></rect>`;
+  });
+
+  const first = priceSeries[0];
+  const last = priceSeries[priceSeries.length - 1];
+  if (first) $('chartStart').textContent = fmtWhen(first.t);
+  if (last) $('chartEnd').textContent = fmtWhen(last.t);
+}
+
+// ---------- controls ----------
+function pickedMinutes() {
+  const custom = Number($('customMins').value);
+  if (custom >= 5) return custom;
+  const active = document.querySelector('.bc-preset.active');
+  return active ? Number(active.dataset.mins) : 60;
+}
+
+document.querySelectorAll('.bc-preset[data-mins]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.bc-preset[data-mins]').forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
+    $('customMins').value = '';
+  });
+});
+$('customMins').addEventListener('input', () => {
+  // When typing a custom value, deactivate all presets visually
+  if (Number($('customMins').value) >= 5) {
+    document.querySelectorAll('.bc-preset[data-mins]').forEach((b) => b.classList.remove('active'));
+  }
+});
+
+$('targetSoc').addEventListener('input', (e) => ($('targetSocVal').textContent = e.target.value + '%'));
+$('minSoc').addEventListener('input', (e) => ($('minSocVal').textContent = e.target.value + '%'));
+$('chargeRate').addEventListener('input', (e) => ($('chargeRateVal').textContent = Number(e.target.value).toFixed(1) + ' kW'));
+
+function pad2(n) { return String(n).padStart(2, '0'); }
+
+// Shape of a "blank" slot — matches what the Fox firmware itself writes for unused slots.
+const BLANK_SLOT = {
+  enable: 0,
+  startHour: 0, startMinute: 0, endHour: 0, endMinute: 0,
+  workMode: 'SelfUse',
+  fdSoc: 100, fdPwr: 10500,
+  minSocOnGrid: 10, maxSoc: 100,
+};
+
+// A slot is "truly blank" if it's a disabled SelfUse with a zero-length window.
+// We prefer to use these for our force-charge so we don't disturb user-numbered slots.
+function isBlankSlot(g) {
+  return g && g.enable === 0 && g.workMode === 'SelfUse'
+    && g.startHour === 0 && g.startMinute === 0
+    && g.endHour === 0 && g.endMinute === 0;
+}
+
+async function readScheduler() {
+  const r = await api('/api/fox/op/v1/device/scheduler/get', {});
+  if (r.errno !== 0) throw new Error('scheduler/get: ' + (r.msg || JSON.stringify(r)));
+  return { enable: r.result?.enable ?? 1, groups: (r.result?.groups || []).slice() };
+}
+
+// Auto-stop monitor: polls SoC every 30 s and calls stopForce() when the threshold is crossed.
+// mode 'charge' → stop when SoC rises to or above threshold (target SoC).
+// mode 'dump'   → stop when SoC falls to or below threshold (reserve SoC).
+let autoStopTimer = null;
+function startAutoStop(threshold, endDate, mode = 'charge') {
+  clearInterval(autoStopTimer);
+  autoStopTimer = setInterval(async () => {
+    if (Date.now() > endDate.getTime()) { clearInterval(autoStopTimer); autoStopTimer = null; return; }
+    try {
+      const r = await api('/api/fox/op/v0/device/real/query', { variables: ['SoC', 'soc'] });
+      const soc = pickVal(r.result?.[0]?.datas, 'SoC') ?? pickVal(r.result?.[0]?.datas, 'soc');
+      if (soc == null) return;
+      const triggered = mode === 'dump' ? soc <= threshold : soc >= threshold;
+      if (triggered) {
+        const msg = mode === 'dump'
+          ? `Reserve ${threshold}% reached (actual ${Math.round(soc)}%) — auto-stopping dump`
+          : `Target ${threshold}% reached (actual ${Math.round(soc)}%) — auto-stopping force charge`;
+        log(msg, 'ok');
+        clearInterval(autoStopTimer);
+        autoStopTimer = null;
+        await stopForce();
+        refreshSchedulerPanel();
+      }
+    } catch (e) { log('auto-stop check failed: ' + e.message, 'err'); }
+  }, 30000);
+}
+function cancelAutoStop() { clearInterval(autoStopTimer); autoStopTimer = null; }
+
+function isAnyForceCharge(g) {
+  return g && (g.workMode === 'ForceCharge' || g.workMode === 'ForceCharge(BAT)');
+}
+function isAnyForceDischarge(g) {
+  return g && g.workMode === 'ForceDischarge';
+}
+function isAnyForcedMode(g) {
+  return isAnyForceCharge(g) || isAnyForceDischarge(g);
+}
+
+// Check whether a group's time window contains the given minutes-since-midnight value.
+function groupMatchesNow(g, nowM) {
+  if (!g.enable) return false;
+  const sM = g.startHour * 60 + g.startMinute;
+  const eM = g.endHour * 60 + g.endMinute;
+  if (sM === eM) return false;
+  return sM < eM ? (nowM >= sM && nowM < eM) : (nowM >= sM || nowM < eM);
+}
+
+async function refreshSchedulerPanel() {
+  try {
+    const s = await readScheduler();
+    $('schedEnable').innerHTML = s.enable
+      ? '<span style="color:var(--green)">● enabled</span>'
+      : '<span style="color:var(--muted)">○ disabled</span>';
+    const now = new Date();
+    const nowM = now.getHours() * 60 + now.getMinutes();
+    const activeIdx = s.groups.findIndex((g) => groupMatchesNow(g, nowM));
+    if (activeIdx >= 0) {
+      const g = s.groups[activeIdx];
+      $('schedActive').innerHTML = `slot ${activeIdx}: <span style="color:var(--green)">${g.workMode}</span> ${pad2(g.startHour)}:${pad2(g.startMinute)}–${pad2(g.endHour)}:${pad2(g.endMinute)} · ${(g.fdPwr/1000).toFixed(1)}kW · cut-off ${g.fdSoc}%`;
+    } else {
+      $('schedActive').textContent = 'none — running default Self-use';
+    }
+    let html = '<thead><tr><th>#</th><th>Mode</th><th>Window</th><th>Rate</th><th>Cut-off</th><th>Max</th><th>En</th></tr></thead><tbody>';
+    s.groups.forEach((g, i) => {
+      const active = groupMatchesNow(g, nowM);
+      const cls = active ? 'active' : (g.enable ? 'on' : '');
+      const blank = g.startHour === 0 && g.startMinute === 0 && g.endHour === 0 && g.endMinute === 0;
+      const win = blank ? '—' : `${pad2(g.startHour)}:${pad2(g.startMinute)}–${pad2(g.endHour)}:${pad2(g.endMinute)}`;
+      html += `<tr class="${cls}"><td>${i}</td><td>${g.workMode}</td><td>${win}</td><td>${(g.fdPwr/1000).toFixed(1)}kW</td><td>${g.fdSoc}%</td><td>${g.maxSoc ?? '—'}%</td><td>${g.enable ? '✓' : ''}</td></tr>`;
+    });
+    html += '</tbody>';
+    $('schedTable').innerHTML = html;
+  } catch (e) { log('scheduler refresh failed: ' + e.message, 'err'); }
+}
+
+async function forceChargeNow() {
+  const mins = pickedMinutes();
+  const targetSoc = Number($('targetSoc').value);
+  const rateKw = Number($('chargeRate').value);
+  const rateW = Math.round(rateKw * 1000);
+  const start = new Date();
+  const end = new Date(Date.now() + mins * 60000);
+
+  const { groups } = await readScheduler();
+
+  // Clear out any stale force-charge slots from previous attempts so there's exactly
+  // one active window (otherwise the firmware honours whichever starts first, which
+  // may be an old "Charging from Grid: Disabled" slot).
+  let cleared = 0;
+  for (let i = 0; i < groups.length; i++) {
+    if (isAnyForcedMode(groups[i])) { groups[i] = { ...BLANK_SLOT }; cleared++; }
+  }
+  if (cleared > 0) log(`Cleared ${cleared} stale forced slot(s).`);
+
+  // Pick the highest-index blank slot so low slots stay free for the user.
+  let slotIdx = -1;
+  for (let i = groups.length - 1; i >= 0; i--) {
+    if (isBlankSlot(groups[i])) { slotIdx = i; break; }
+  }
+  if (slotIdx === -1) {
+    log('No free scheduler slot available. Free one in the Fox app (disable + zero a row) then retry.', 'err');
+    return;
+  }
+
+  groups[slotIdx] = {
+    enable: 1,
+    startHour: start.getHours(), startMinute: start.getMinutes(),
+    endHour: end.getHours(), endMinute: end.getMinutes(),
+    workMode: 'ForceCharge(BAT)',
+    // In ForceCharge mode, fdSoc is "Charging Cut-off SOC" (the target — charge UP TO this).
+    // maxSoc is the ceiling. fdPwr is the charge power.
+    fdSoc: targetSoc, fdPwr: rateW,
+    minSocOnGrid: 10,
+    maxSoc: targetSoc,
+  };
+
+  log(`Force charge → slot ${slotIdx}, ${pad2(start.getHours())}:${pad2(start.getMinutes())} → ${pad2(end.getHours())}:${pad2(end.getMinutes())} to ${targetSoc}% @ ${rateKw.toFixed(1)}kW …`);
+  const r = await api('/api/fox/op/v1/device/scheduler/enable', { enable: 1, groups });
+  if (r.errno !== 0) { log(`scheduler/enable failed: ${r.msg || JSON.stringify(r)}`, 'err'); return; }
+
+  await new Promise((res) => setTimeout(res, 1500));
+  const verify = await readScheduler();
+  // Firmware auto-sorts groups (by startHour), so our write may have landed in a
+  // different slot. Verify by content: find any enabled ForceCharge matching our window.
+  const foundIdx = verify.groups.findIndex((g) =>
+    isAnyForceCharge(g) && g.enable === 1
+    && g.startHour === start.getHours() && g.startMinute === start.getMinutes()
+    && g.endHour === end.getHours() && g.endMinute === end.getMinutes()
+  );
+  if (foundIdx >= 0) {
+    const g = verify.groups[foundIdx];
+    log(`Force charge active for ${mins} min ✓ (slot ${foundIdx}, mode=${g.workMode}, rate=${(g.fdPwr/1000).toFixed(1)}kW, cut-off ${g.fdSoc}%)`, 'ok');
+    startAutoStop(targetSoc, end);
+    log(`Auto-stop armed: will clear slot when SoC hits ${targetSoc}% or at ${pad2(end.getHours())}:${pad2(end.getMinutes())}.`);
+  } else {
+    log(`Write reported OK but no enabled ForceCharge slot matches our window — firmware rejected. Click Diagnose.`, 'err');
+  }
+  setTimeout(loadLive, 3000);
+}
+
+async function stopForce() {
+  cancelAutoStop();
+  // Clear any forced-mode slots (charge or discharge); leave every other slot exactly as it was.
+  const { enable, groups } = await readScheduler();
+  let cleared = 0;
+  for (let i = 0; i < groups.length; i++) {
+    if (isAnyForcedMode(groups[i])) {
+      groups[i] = { ...BLANK_SLOT };
+      cleared++;
+    }
+  }
+  if (cleared === 0) { log('No active forced slot to clear.', 'ok'); return; }
+  const r = await api('/api/fox/op/v1/device/scheduler/enable', { enable, groups });
+  if (r.errno === 0) log(`Cleared ${cleared} forced slot(s); other slots untouched ✓`, 'ok');
+  else log('stop failed: ' + (r.msg || JSON.stringify(r)), 'err');
+}
+
+async function forceDumpNow() {
+  const mins = pickedMinutes();
+  const reserveSoc = Number($('minSoc').value);   // stop discharging at reserve SoC
+  const rateKw = Number($('chargeRate').value);
+  const rateW = Math.round(rateKw * 1000);
+  const start = new Date();
+  const end = new Date(Date.now() + mins * 60000);
+
+  const { groups } = await readScheduler();
+
+  // Clear any stale forced slots first.
+  let cleared = 0;
+  for (let i = 0; i < groups.length; i++) {
+    if (isAnyForcedMode(groups[i])) { groups[i] = { ...BLANK_SLOT }; cleared++; }
+  }
+  if (cleared > 0) log(`Cleared ${cleared} stale forced slot(s).`);
+
+  let slotIdx = -1;
+  for (let i = groups.length - 1; i >= 0; i--) {
+    if (isBlankSlot(groups[i])) { slotIdx = i; break; }
+  }
+  if (slotIdx === -1) {
+    log('No free scheduler slot available. Free one in the Fox app then retry.', 'err');
+    return;
+  }
+
+  groups[slotIdx] = {
+    enable: 1,
+    startHour: start.getHours(), startMinute: start.getMinutes(),
+    endHour: end.getHours(), endMinute: end.getMinutes(),
+    workMode: 'ForceDischarge',
+    // fdSoc = discharge cut-off (stop when battery hits this level)
+    fdSoc: reserveSoc, fdPwr: rateW,
+    minSocOnGrid: reserveSoc,
+    maxSoc: 100,
+  };
+
+  log(`Dump to grid → slot ${slotIdx}, ${pad2(start.getHours())}:${pad2(start.getMinutes())} → ${pad2(end.getHours())}:${pad2(end.getMinutes())} to ${reserveSoc}% floor @ ${rateKw.toFixed(1)}kW …`);
+  const r = await api('/api/fox/op/v1/device/scheduler/enable', { enable: 1, groups });
+  if (r.errno !== 0) { log(`scheduler/enable failed: ${r.msg || JSON.stringify(r)}`, 'err'); return; }
+
+  await new Promise((res) => setTimeout(res, 1500));
+  const verify = await readScheduler();
+  const foundIdx = verify.groups.findIndex((g) =>
+    isAnyForceDischarge(g) && g.enable === 1
+    && g.startHour === start.getHours() && g.startMinute === start.getMinutes()
+    && g.endHour === end.getHours() && g.endMinute === end.getMinutes()
+  );
+  if (foundIdx >= 0) {
+    const g = verify.groups[foundIdx];
+    log(`Dump to grid active for ${mins} min ✓ (slot ${foundIdx}, rate=${(g.fdPwr/1000).toFixed(1)}kW, floor ${g.fdSoc}%)`, 'ok');
+    startAutoStop(reserveSoc, end, 'dump');
+    log(`Auto-stop armed: will clear slot when SoC hits ${reserveSoc}% or at ${pad2(end.getHours())}:${pad2(end.getMinutes())}.`);
+  } else {
+    log(`Write reported OK but no enabled ForceDischarge slot found — firmware may have rejected. Click Diagnose.`, 'err');
+  }
+  setTimeout(loadLive, 3000);
+}
+
+async function applyMinSoc() {
+  const v = Number($('minSoc').value);
+  // Best-effort: write via generic setting. Some firmwares use different keys.
+  const r = await api('/api/fox/op/v0/device/setting/set', { key: 'MinSocOnGrid', value: String(v) });
+  if (r.errno === 0) log(`Min SoC on grid set to ${v}% ✓`, 'ok');
+  else log('setting/set MinSocOnGrid failed: ' + (r.msg || JSON.stringify(r)) + ' (firmware may use different key)', 'err');
+}
+
+async function diagnose() {
+  log('--- diagnose: full scheduler + realtime variable dump ---');
+
+  // 1. Full scheduler state, no truncation — we need exact field names.
+  for (const [name, url] of [
+    ['v1 scheduler/get', '/api/fox/op/v1/device/scheduler/get'],
+    ['v0 scheduler/get', '/api/fox/op/v0/device/scheduler/get'],
+  ]) {
+    try {
+      const r = await api(url, {});
+      if (r.errno === 0) log(`${name}: ${JSON.stringify(r.result)}`, 'ok');
+      else log(`${name} FAIL errno=${r.errno} msg=${r.msg}`, 'err');
+    } catch (e) { log(`${name} threw: ${e.message}`, 'err'); }
+  }
+
+  // 2. Broad real-time variable sweep — see which names your device actually returns.
+  const allVars = [
+    'pvPower', 'pv1Power', 'pv2Power', 'soc', 'SoC', 'batterySoc', 'bmsSoc',
+    'feedinPower', 'gridConsumptionPower', 'loadsPower', 'generationPower',
+    'batChargePower', 'batDischargePower', 'invBatPower', 'batPower',
+    'meterPower', 'meterPower2', 'batTemperature', 'ambientTemperation', 'invTemperation',
+    'RCurrent', 'RVolt', 'RPower', 'RFreq',
+  ];
+  try {
+    const r = await api('/api/fox/op/v0/device/real/query', { variables: allVars });
+    if (r.errno === 0) {
+      const datas = r.result?.[0]?.datas || [];
+      const present = datas
+        .filter((d) => d.value != null && d.value !== '')
+        .map((d) => `${d.variable}=${d.value}${d.unit || ''}`);
+      log(`real-time keys returned (${present.length}): ${present.join(', ')}`, 'ok');
+    } else {
+      log(`real-time sweep FAIL errno=${r.errno} msg=${r.msg}`, 'err');
+    }
+  } catch (e) { log(`real-time threw: ${e.message}`, 'err'); }
+
+  // 3. AEMO forecast sanity
+  try {
+    const fc = await api('/api/aemo/forecast');
+    const arr = Array.isArray(fc) ? fc : (fc.PREDISPATCH_PRICE || fc.data || []);
+    const mine = arr.filter((x) => (x.REGIONID || x.regionid) === cfg.aemoRegion);
+    log(`AEMO forecast: total=${arr.length}, ${cfg.aemoRegion}=${mine.length}${mine[0] ? ', first=' + JSON.stringify(mine[0]) : ''}`, mine.length > 0 ? 'ok' : 'err');
+  } catch (e) { log(`AEMO forecast threw: ${e.message}`, 'err'); }
+
+  // 4. Solar: probe report/query one variable at a time (batch fails if any name is invalid).
+  const d = new Date();
+  const probe = ['generation', 'pvEnergyTotal', 'pvEnergyTotalSum', 'pv1EnergyTotal', 'pv2EnergyTotal',
+                 'pvPower', 'pv1Power', 'pv2Power', 'input', 'inputEnergy', 'pvGeneration',
+                 'chargeEnergyToTal', 'dischargeEnergyToTal'];
+  const results = [];
+  for (const name of probe) {
+    try {
+      const r = await api('/api/fox/op/v0/device/report/query', {
+        year: d.getFullYear(), month: d.getMonth() + 1, day: d.getDate(),
+        dimension: 'day', variables: [name],
+      });
+      if (r.errno === 0 && Array.isArray(r.result) && r.result[0]?.values) {
+        const total = r.result[0].values.reduce((a, b) => a + (Number(b) || 0), 0);
+        results.push(`${name}=${total.toFixed(2)}`);
+      } else {
+        results.push(`${name}=x`); // not supported
+      }
+    } catch { results.push(`${name}=err`); }
+  }
+  log(`solar probe (compare to Fox app "Total PV Production"): ${results.join(' · ')}`, 'ok');
+
+  log('--- done ---');
+}
+
+$('forceChargeBtn').addEventListener('click', () => forceChargeNow().then(refreshSchedulerPanel).catch((e) => log(e.message, 'err')));
+$('forceDumpBtn').addEventListener('click', () => forceDumpNow().then(refreshSchedulerPanel).catch((e) => log(e.message, 'err')));
+$('stopForceBtn').addEventListener('click', () => stopForce().then(refreshSchedulerPanel).catch((e) => log(e.message, 'err')));
+$('applyMinSoc').addEventListener('click', () => applyMinSoc().catch((e) => log(e.message, 'err')));
+$('diagnoseBtn').addEventListener('click', () => diagnose().catch((e) => log(e.message, 'err')));
+$('refreshSched').addEventListener('click', () => refreshSchedulerPanel());
+$('refresh').addEventListener('click', () => { refreshAll(); refreshSchedulerPanel(); });
+
+// Chart hover tooltips (price + solar)
+function wireTooltip(chartId, tooltipId, renderFn) {
+  const chart = $(chartId);
+  const tip = $(tooltipId);
+  if (!chart || !tip) return;
+  chart.addEventListener('mousemove', (e) => {
+    const r = e.target.closest('rect[data-when]');
+    if (!r) { tip.style.display = 'none'; return; }
+    tip.innerHTML = renderFn(r);
+    tip.style.display = 'block';
+    const wrap = chart.parentElement.getBoundingClientRect();
+    let x = e.clientX - wrap.left + 12;
+    let y = e.clientY - wrap.top - 30;
+    if (x + tip.offsetWidth > wrap.width) x = e.clientX - wrap.left - tip.offsetWidth - 12;
+    tip.style.left = x + 'px';
+    tip.style.top = Math.max(0, y) + 'px';
+  });
+  chart.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+}
+wireTooltip('chart', 'chartTooltip', (r) => {
+  const when = r.getAttribute('data-when');
+  const retail = r.getAttribute('data-retail');
+  const spot = r.getAttribute('data-spot');
+  const tou = r.getAttribute('data-tou');
+  return `<b>${when}</b> · ${retail} ¢/kWh<div class="sub">spot $${spot}/MWh · ${tou}</div>`;
+});
+// Synced vertical cursor — both charts share the same time window so mapping is a
+// simple fractional-x passthrough.
+const SYNCED_CHARTS = ['chart', 'solarChart'];
+function setCursor(chartId, fracX) {
+  const svg = $(chartId); if (!svg) return;
+  let c = svg.querySelector('.cursor');
+  if (!c) {
+    c = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    c.setAttribute('class', 'cursor');
+    c.setAttribute('stroke', '#ffffff');
+    c.setAttribute('stroke-width', '1');
+    c.setAttribute('stroke-dasharray', '3 3');
+    c.setAttribute('opacity', '0.7');
+    c.style.pointerEvents = 'none';
+    svg.appendChild(c);
+  }
+  const vb = svg.viewBox.baseVal;
+  const x = vb.x + vb.width * Math.max(0, Math.min(1, fracX));
+  c.setAttribute('x1', x); c.setAttribute('x2', x);
+  c.setAttribute('y1', vb.y); c.setAttribute('y2', vb.y + vb.height);
+  c.style.display = 'block';
+}
+function hideCursors() {
+  SYNCED_CHARTS.forEach((id) => { const c = $(id)?.querySelector('.cursor'); if (c) c.style.display = 'none'; });
+}
+SYNCED_CHARTS.forEach((id) => {
+  const el = $(id); if (!el) return;
+  el.addEventListener('mousemove', (e) => {
+    const r = el.getBoundingClientRect();
+    const frac = (e.clientX - r.left) / r.width;
+    SYNCED_CHARTS.forEach((otherId) => setCursor(otherId, frac));
+  });
+  el.addEventListener('mouseleave', hideCursors);
+});
+
+wireTooltip('solarChart', 'solarTooltip', (r) => {
+  const when = r.getAttribute('data-when');
+  const kw = r.getAttribute('data-kw');
+  const actual = r.getAttribute('data-actual');
+  const cloud = r.getAttribute('data-cloud');
+  if (actual) {
+    const a = Number(actual), p = Number(kw);
+    const pct = p > 0 ? Math.round((a / p) * 100) : null;
+    const deltaLabel = pct != null
+      ? (pct >= 100 ? `+${pct - 100}% over` : `${pct}% of`)
+      : '';
+    return `<b>${when}</b><div>actual <b style="color:#ffb020">${a.toFixed(2)} kW</b> · predicted ${p.toFixed(2)} kW</div><div class="sub">${deltaLabel} prediction · cloud ${cloud}%</div>`;
+  }
+  return `<b>${when}</b> · predicted ${Number(kw).toFixed(2)} kW<div class="sub">cloud ${cloud}%</div>`;
+});
+
+// ---------- bootstrap ----------
+async function refreshAll() {
+  await Promise.all([loadLive().catch((e) => log('live: ' + e.message, 'err')),
+                     loadToday().catch((e) => log('today: ' + e.message, 'err')),
+                     loadPrices().catch((e) => log('prices: ' + e.message, 'err')),
+                     loadSolar().catch((e) => log('solar: ' + e.message, 'err')),
+                     loadWeek().catch((e) => log('week: ' + e.message, 'err')),
+                     loadRecommendation().catch((e) => log('recommendation: ' + e.message, 'err'))]);
+}
+
+// ---------- 7-day daily totals strip ----------
+// Rows = days, columns = metrics (column order matches the tiles above).
+// Cached SoC-by-date so loadWeek can merge in the EoD SoC column without a
+// second fetch. Populated by loadSocHistory(); hoisted here so loadWeek (top-level)
+// can see it.
+let socHistoryByDate = {};
+let socTargetLocal = '19:30';
+
+async function loadWeek() {
+  // Request 8 days so we still have 7 prior days after filtering out today.
+  const r = await api('/api/report/week?days=8');
+  const el = $('weekGrid');
+  if (!r || !r.days) { el.innerHTML = ''; return; }
+  // API returns oldest-first. Drop today (it's already in the tiles above)
+  // and show newest-first.
+  const days = r.days.filter((d) => !d.isToday).slice().reverse();
+  const cols = [
+    { cls: 'pv',        key: 'generation',           label: 'Solar gen' },
+    { cls: 'load',      key: 'loads',                label: 'House use' },
+    { cls: 'import',    key: 'gridConsumption',      label: 'Grid import' },
+    { cls: 'export',    key: 'feedin',               label: 'Grid export' },
+    { cls: 'soc',       key: '__soc',                label: 'EoD SoC',     unit: '%', isPct: true, barMax: 50 },
+    { cls: 'charge',    key: 'chargeEnergyToTal',    label: 'Battery in' },
+    { cls: 'discharge', key: 'dischargeEnergyToTal', label: 'Battery out' },
+  ];
+  // Merge in SoC values from /api/soc-history (cached in socHistoryByDate).
+  for (const d of days) {
+    const s = socHistoryByDate[d.date];
+    d.__soc = (s && s.soc != null) ? s.soc : null;
+  }
+  // Per-column max so bars are normalized within the same metric across days.
+  // Percentage columns (SoC) are scaled 0-100 directly, not by their max.
+  const maxByKey = Object.fromEntries(
+    cols.map((c) => [c.key, c.isPct ? 100 : Math.max(...days.map((d) => d[c.key] ?? 0), 0.01)])
+  );
+
+  const head = '<thead><tr><th></th>'
+    + cols.map((c) => `<th class="${c.cls}">${c.label}</th>`).join('')
+    + '</tr></thead>';
+
+  const body = '<tbody>' + days.map((d) => {
+    const rowCls = d.isToday ? ' class="today-row"' : '';
+    const cells = cols.map((c) => {
+      // Percentage column (SoC): render as N% with bar scaled to barMax (default 100).
+      if (c.isPct) {
+        const raw = d[c.key];
+        const todayCls2 = d.isToday ? ' today' : '';
+        if (raw == null) return `<td class="${c.cls}${todayCls2} zero"><span>—</span></td>`;
+        const barMax = c.barMax || 100;
+        const pct = Math.max(0, Math.min(100, (raw / barMax) * 100));
+        return `<td class="${c.cls}${todayCls2}"><span class="bar" style="transform:scaleX(${pct / 100})"></span><span>${Math.round(raw)}${c.unit || ''}</span></td>`;
+      }
+      const v = d[c.key] ?? 0;
+      const pct = Math.max(0, Math.min(100, (v / maxByKey[c.key]) * 100));
+      const zeroCls = v <= 0.05 ? ' zero' : '';
+      const todayCls = d.isToday ? ' today' : '';
+      let sub = '';
+      let dumpBar = '';
+      if (c.key === 'feedin') {
+        const dw = d.feedinDumpWindow;
+        if (dw == null) sub = '';
+        else if (dw < 0.1) sub = `<span class="sub dump-no">dump —</span>`;
+        else {
+          sub = `<span class="sub dump-yes">dump ${dw.toFixed(1)}</span>`;
+          // Clamp dump bar width to the total bar width so sampling noise (5-min
+          // integral can slightly exceed the Fox daily meter total) never shows
+          // the dump bar overflowing the outer total.
+          const dumpPct = Math.max(0, Math.min(pct, (dw / maxByKey[c.key]) * 100));
+          dumpBar = `<span class="bar bar-dump" style="transform:scaleX(${dumpPct / 100})"></span>`;
+        }
+      }
+      return `<td class="${c.cls}${zeroCls}${todayCls}"><span class="bar" style="transform:scaleX(${pct / 100})"></span>${dumpBar}<span>${sub}${v != null ? v.toFixed(1) : '—'}</span></td>`;
+    }).join('');
+    return `<tr${rowCls}><th${d.isToday ? ' class="today"' : ''}>${d.dayOfWeek} ${d.date.slice(8)}</th>${cells}</tr>`;
+  }).join('') + '</tbody>';
+
+  el.innerHTML = head + body;
+}
+
+// ---------- today's plan ----------
+async function loadRecommendation() {
+  const r = await api('/api/recommendation');
+  const head = $('recHeadline'), sub = $('recSubline');
+  const narr = $('recNarrative'), netEl = $('recNet'), dumpExpEl = $('recDumpExpected');
+  const setKV = (id, text) => { const el = $(id); if (el) el.textContent = text; };
+
+  if (!r || r.error || r.action === 'error') {
+    head.textContent = '—';
+    head.style.color = 'var(--muted)';
+    sub.textContent = r?.error || (r?.partial ? `missing inputs: ${JSON.stringify(r.partial || {})}` : 'no data');
+    narr.textContent = '—';
+    netEl.textContent = '—';
+    dumpExpEl.textContent = '—';
+    setKV('recComputedAt', '—');
+    ['recSoC','recUsable','recSolar','recLoad','recDump','recSurplus'].forEach((id) => setKV(id, '—'));
+    return;
+  }
+  if (r.action === 'disabled') {
+    head.textContent = 'Disabled';
+    head.style.color = 'var(--muted)';
+    sub.textContent = 'set recommendation.enabled=true to turn on';
+    narr.textContent = '—';
+    return;
+  }
+
+  const inp = r.inputs || {}, c = r.computed || {};
+  setKV('recComputedAt', r.computedAt ? new Date(r.computedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—');
+
+  // Headline + sub come pre-formatted from the backend.
+  head.textContent = r.headline || '—';
+  sub.textContent = r.subline || '';
+  const headColour = r.action === 'none' ? 'var(--green)'
+    : r.action === 'topUp' ? 'var(--amber)'
+    : r.action === 'solarShort' ? 'var(--amber)'
+    : 'var(--muted)';
+  head.style.color = headColour;
+  narr.style.borderLeftColor = headColour;
+  narr.textContent = r.narrative || '—';
+
+  // Net dollars
+  if (r.netDollars != null) {
+    const sign = r.netDollars >= 0 ? '+' : '';
+    netEl.textContent = `${sign}$${r.netDollars.toFixed(2)}`;
+    netEl.style.color = r.netDollars > 0 ? 'var(--green)' : 'var(--muted)';
+  } else {
+    netEl.textContent = '—';
+  }
+
+  if (r.expectedDumpKwh != null) {
+    dumpExpEl.textContent = `${r.expectedDumpKwh} kWh · $${(r.expectedDumpRevenueDollars || 0).toFixed(2)}`;
+    dumpExpEl.style.color = 'var(--green)';
+  } else {
+    dumpExpEl.textContent = '—';
+  }
+
+  // Details (collapsed by default)
+  setKV('recSoC', inp.currentSoCPct != null ? `${inp.currentSoCPct}% · ${(inp.currentSoCPct / 100 * (inp.batteryCapacityKwh || 0)).toFixed(1)} kWh` : '—');
+  setKV('recUsable', c.usableNowKwh != null ? `${c.usableNowKwh} kWh` : '—');
+  setKV('recSolar', inp.solarRemainingKwh != null ? `${inp.solarRemainingKwh} kWh to sunset` : '—');
+  setKV('recLoad', inp.avgDailyLoadKwh != null ? `${c.loadToDawnKwh} kWh (avg ${inp.avgDailyLoadKwh} kWh/day · ${inp.loadSamples} days)` : '—');
+  setKV('recDump', inp.dumpTargetKwh != null ? `${inp.dumpTargetKwh} kWh · ${inp.dumpWindowLocal?.start}–${inp.dumpWindowLocal?.end}` : '—');
+  const surplusNum = c.surplusKwh;
+  if (surplusNum != null) {
+    const s = surplusNum >= 0 ? '+' : '';
+    const el = $('recSurplus');
+    el.textContent = `${s}${surplusNum} kWh`;
+    el.style.color = surplusNum >= 0 ? 'var(--green)' : 'var(--amber)';
+  }
+}
+
+$('recRefresh').addEventListener('click', () => loadRecommendation().catch((e) => log('recommendation: ' + e.message, 'err')));
+
+(async () => {
+  try {
+    cfg = Object.assign(cfg, await api('/api/config'));
+    $('region').textContent = cfg.aemoRegion;
+    if (cfg.serverStartedAt) {
+      const d = new Date(cfg.serverStartedAt);
+      const stamp = d.toLocaleString([], { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+      $('deployStamp').textContent = `v ${stamp}`;
+      $('deployStamp').title = `Server started ${d.toLocaleString()}`;
+    }
+    log(`Connected to proxy. Region: ${cfg.aemoRegion}. Polling every ${cfg.pollSeconds}s.`, 'ok');
+  } catch (e) {
+    log('proxy not reachable: ' + e.message, 'err');
+  }
+  // Always-on (slow) pollers — all Fox read calls behind proxy cache.
+  setInterval(() => { if (!document.hidden) loadToday().catch(() => {}); },            (cfg.todayPollSeconds     || 600) * 1000);
+  setInterval(() => { if (!document.hidden) refreshSchedulerPanel().catch(() => {}); }, (cfg.schedulerPollSeconds || 600) * 1000);
+  // Not Fox — fine to keep running.
+  setInterval(() => { if (!document.hidden) loadPrices().catch(() => {}); },            (cfg.pricePollSeconds     || 300) * 1000);
+  setInterval(() => { if (!document.hidden) loadSolar().catch(() => {}); },             30 * 60 * 1000);
+  setInterval(() => { if (!document.hidden) loadRecommendation().catch(() => {}); },     10 * 60 * 1000);
+  setInterval(() => { if (!document.hidden) loadWeek().catch(() => {}); },                15 * 60 * 1000);
+
+  // Live polling — opt-in via toggle, auto-pauses when tab hidden.
+  let liveTimer = null;
+  function applyLiveState(on) {
+    $('liveToggle').classList.toggle('on', on);
+    if (on) {
+      if (!liveTimer) {
+        loadLive().catch(() => {});
+        liveTimer = setInterval(() => {
+          if (!document.hidden) loadLive().catch(() => {});
+        }, (cfg.pollSeconds || 30) * 1000);
+      }
+      log(`Live polling ON — ${cfg.pollSeconds || 30}s cadence.`, 'ok');
+    } else {
+      if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
+      setStatus(null, 'live paused');
+      log('Live polling OFF — headline numbers go stale.', '');
+    }
+  }
+  // Restore preference from localStorage (default OFF to save calls)
+  const savedLive = localStorage.getItem('liveMode') === 'on';
+  applyLiveState(savedLive);
+  $('liveToggle').addEventListener('click', () => {
+    if (document.body.classList.contains('locked')) { openUnlockPrompt(); return; }
+    const next = !$('liveToggle').classList.contains('on');
+    localStorage.setItem('liveMode', next ? 'on' : 'off');
+    applyLiveState(next);
+  });
+
+  // Initial fetches (non-live always-on data)
+  Promise.all([loadToday(), loadPrices(), loadSolar(), refreshSchedulerPanel(), loadRecommendation(), loadWeek()]).catch(() => {});
+  if (savedLive) loadLive().catch(() => {});
+
+  // ---------- End-of-day SoC ----------
+  async function loadSocHistory() {
+    let r;
+    try { r = await api('/api/soc-history?days=8'); }
+    catch { return; }
+    if (!r || r.error) return;
+    socTargetLocal = r.targetLocal || '19:30';
+    socHistoryByDate = {};
+    for (const d of (r.days || [])) socHistoryByDate[d.date] = d;
+    // Today's tile: only show after target time has passed AND a snapshot exists.
+    const now = new Date();
+    const todayKey = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+    const [th, tm] = socTargetLocal.split(':').map(Number);
+    const past = now.getHours() > th || (now.getHours() === th && now.getMinutes() >= tm);
+    const todayEntry = socHistoryByDate[todayKey];
+    const tile = $('t-soc-tile');
+    $('t-soc-time').textContent = socTargetLocal;
+    if (past && todayEntry && todayEntry.soc != null) {
+      tile.style.display = '';
+      $('t-soc').textContent = Math.round(todayEntry.soc) + '%';
+    } else {
+      tile.style.display = 'none';
+    }
+    // Re-render week grid so the new column populates.
+    if (typeof loadWeek === 'function' && document.querySelector('#weekGrid thead')) {
+      // weekGrid already rendered — just refresh it from cached data via loadWeek
+      loadWeek().catch(() => {});
+    }
+  }
+  if (cfg.configured !== false) loadSocHistory().catch(() => {});
+  setInterval(() => { if (!document.hidden) loadSocHistory().catch(() => {}); }, 30 * 60 * 1000);
+
+  // ---------- Solar calibration ----------
+  async function loadCalibration() {
+    const days = Number($('calibDays').value) || 14;
+    const tbody = $('calibTable');
+    tbody.innerHTML = '<tr><td colspan="4" style="color:var(--muted)">Loading…</td></tr>';
+    $('calibApply').disabled = true;
+    let r;
+    try { r = await api('/api/solar/calibration?days=' + days); }
+    catch (e) { tbody.innerHTML = '<tr><td style="color:var(--red)">Failed: ' + e.message + '</td></tr>'; return; }
+    if (r.error) { tbody.innerHTML = '<tr><td style="color:var(--red)">' + r.error + '</td></tr>'; return; }
+    const cur = r.currentEfficiency;
+    const sug = r.suggestedEfficiency;
+    $('calibCurrent').textContent = cur != null ? Number(cur).toFixed(3) : '—';
+    $('calibSuggested').textContent = sug != null ? Number(sug).toFixed(3) : '—';
+    $('calibCount').textContent = r.sampleCount ?? '—';
+    const rows = (r.days || []).slice().reverse().map((d) => {
+      const eff = d.measuredEfficiency;
+      const effText = eff != null ? eff.toFixed(3) : (d.excluded ? 'excluded' : '—');
+      const effColour = eff == null ? 'var(--muted)'
+        : (Math.abs(eff - (cur || 0)) < 0.05 ? 'var(--text)'
+           : (eff > (cur || 0) ? 'var(--green)' : 'var(--amber)'));
+      const rowStyle = d.excluded ? ' style="opacity:.45"' : '';
+      return `<tr${rowStyle}><td>${d.date}</td>`
+        + `<td style="text-align:right">${d.actualKwh != null ? d.actualKwh.toFixed(1) + ' kWh' : '—'}</td>`
+        + `<td style="text-align:right">${d.idealKwh.toFixed(1)} kWh</td>`
+        + `<td style="text-align:right;color:${effColour}">${effText}</td></tr>`;
+    }).join('');
+    tbody.innerHTML = '<thead><tr><th>Date</th><th style="text-align:right">Actual</th><th style="text-align:right">Ideal</th><th style="text-align:right">Ratio</th></tr></thead><tbody>' + rows + '</tbody>';
+    // Enable Apply only when unlocked and there's a meaningful change to apply.
+    const canApply = sug != null && cur != null && Math.abs(sug - cur) > 0.005;
+    $('calibApply').disabled = !canApply;
+    $('calibApply').dataset.value = sug != null ? String(sug) : '';
+  }
+
+  async function applyCalibration() {
+    const v = Number($('calibApply').dataset.value);
+    if (!v) return;
+    if (document.body.classList.contains('locked')) { openUnlockPrompt(); return; }
+    // Fetch full settings, patch solar.efficiencyFactor, save back.
+    const current = await fetch('/api/settings', { headers: { 'X-Admin-Password': sessionStorage.getItem('adminPw') || '' } });
+    if (!current.ok) { log('Could not load settings (status ' + current.status + ').', 'err'); return; }
+    const s = await current.json();
+    // Server returns masked API key — preserve it by sending the mask back, server keeps the real value.
+    s.solar = s.solar || {};
+    s.solar.efficiencyFactor = v;
+    delete s.__configured; delete s.__defaultPassword;
+    const save = await fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Admin-Password': sessionStorage.getItem('adminPw') || '' },
+      body: JSON.stringify(s),
+    });
+    if (!save.ok) { log('Save failed: ' + save.status, 'err'); return; }
+    log(`Efficiency factor set to ${v.toFixed(3)}. Solar forecast will use it on next refresh.`, 'ok');
+    loadCalibration();
+    loadSolar().catch(() => {});
+  }
+
+  $('calibRefresh').addEventListener('click', () => loadCalibration());
+  $('calibDays').addEventListener('change', () => loadCalibration());
+  $('calibApply').addEventListener('click', applyCalibration);
+  // Initial load (skip if not configured to avoid a noisy 503 on first run)
+  if (cfg.configured !== false) loadCalibration().catch(() => {});
+
+  // ---------- Settings modal + lock state ----------
+  const backdrop = $('settingsBackdrop');
+  const authPane = $('settingsAuth');
+  const formPane = $('settingsForm');
+  const errEl = $('settingsErr');
+  const okEl = $('settingsOk');
+  const subEl = $('settingsSub');
+  let adminPw = sessionStorage.getItem('adminPw') || '';
+  let unlockMode = 'settings'; // 'settings' or 'unlock'
+
+  function applyLockState(unlocked) {
+    document.body.classList.toggle('locked', !unlocked);
+  }
+
+  async function verifyAdminPw(pw) {
+    if (!pw) return false;
+    const r = await fetch('/api/settings/verify', { method: 'POST', headers: { 'X-Admin-Password': pw } });
+    return r.ok;
+  }
+
+  // On load: verify any cached password; otherwise run locked.
+  (async () => {
+    applyLockState(false);
+    if (adminPw && await verifyAdminPw(adminPw)) {
+      applyLockState(true);
+    } else if (adminPw) {
+      sessionStorage.removeItem('adminPw');
+      adminPw = '';
+    }
+  })();
+
+  function openSettings(openToForm = false) {
+    errEl.textContent = '';
+    okEl.textContent = '';
+    unlockMode = 'settings';
+    backdrop.classList.add('show');
+    if (openToForm && adminPw) {
+      loadSettings().catch((e) => { errEl.textContent = e.message; showAuth(); });
+    } else {
+      showAuth();
+      setTimeout(() => $('adminPw').focus(), 30);
+    }
+  }
+  function openUnlockPrompt() {
+    errEl.textContent = '';
+    okEl.textContent = '';
+    unlockMode = 'unlock';
+    backdrop.classList.add('show');
+    showAuth();
+    subEl.textContent = 'Enter the admin password to unlock controls.';
+    setTimeout(() => $('adminPw').focus(), 30);
+  }
+  function closeSettings() { backdrop.classList.remove('show'); }
+  function showAuth() {
+    authPane.style.display = '';
+    formPane.style.display = 'none';
+    subEl.textContent = 'Enter the admin password to view or edit.';
+    $('adminPw').value = '';
+  }
+  function showForm() {
+    authPane.style.display = 'none';
+    formPane.style.display = '';
+    subEl.textContent = 'Changes are written to config.json and take effect immediately.';
+  }
+
+  async function loadSettings() {
+    const r = await fetch('/api/settings', { headers: { 'X-Admin-Password': adminPw } });
+    if (r.status === 401) { sessionStorage.removeItem('adminPw'); adminPw = ''; throw new Error('Bad password'); }
+    if (!r.ok) throw new Error('Failed to load settings: ' + r.status);
+    const s = await r.json();
+    $('s_foxApiKey').value = s.foxApiKey || '';
+    $('s_deviceSN').value = s.deviceSN || '';
+    $('s_aemoRegion').value = s.aemoRegion || 'VIC1';
+    $('s_timezone').value = s.timezone || 'Australia/Melbourne';
+    $('pwWarn').classList.toggle('show', !!s.__defaultPassword);
+    $('s_pollSeconds').value = s.pollSeconds ?? 30;
+    $('s_todayPollSeconds').value = s.todayPollSeconds ?? 600;
+    $('s_schedulerPollSeconds').value = s.schedulerPollSeconds ?? 600;
+    $('s_pricePollSeconds').value = s.pricePollSeconds ?? 300;
+    const sol = s.solar || {};
+    $('s_lat').value = sol.latitude ?? '';
+    $('s_lon').value = sol.longitude ?? '';
+    $('s_tilt').value = sol.tiltDegrees ?? 30;
+    $('s_az').value = sol.azimuthOpenMeteo ?? 180;
+    $('s_kw').value = sol.systemKw ?? 10;
+    $('s_eff').value = sol.efficiencyFactor ?? 0.85;
+    $('s_calibStart').value = sol.calibrationStartDate || '';
+    const n = s.notifications || {};
+    $('s_ntfyTopic').value = n.ntfyTopic || '';
+    $('s_ntfyServer').value = n.ntfyServer || '';
+    $('s_batKwh').value = s.battery?.capacityKwh ?? 10;
+    const mk = s.flowPowerMarkup || {};
+    $('s_loss').value = mk.lossFactor ?? 1;
+    $('s_gst').value = mk.gstRate ?? 0;
+    $('s_supply').value = mk.dailySupplyDollars ?? 1;
+    $('s_fit').value = mk.feedInFlatCentsPerKwh ?? 0;
+    const tou = mk.tou || {};
+    $('s_tou_off').value = tou.offPeak?.flatCentsPerKwh ?? 5;
+    $('s_tou_off_h').value = tou.offPeak?.hours ?? '20-07';
+    $('s_tou_sh').value = tou.shoulder?.flatCentsPerKwh ?? 5;
+    $('s_tou_sh_h').value = tou.shoulder?.hours ?? '07-15';
+    $('s_tou_pk').value = tou.peak?.flatCentsPerKwh ?? 5;
+    $('s_tou_pk_h').value = tou.peak?.hours ?? '15-20';
+    showForm();
+  }
+
+  async function saveSettings() {
+    errEl.textContent = '';
+    okEl.textContent = '';
+    const payload = {
+      foxApiKey: $('s_foxApiKey').value.trim(),
+      deviceSN: $('s_deviceSN').value.trim(),
+      aemoRegion: $('s_aemoRegion').value,
+      timezone: $('s_timezone').value.trim() || 'Australia/Melbourne',
+      port: cfg.port || 8080,
+      pollSeconds: +$('s_pollSeconds').value,
+      todayPollSeconds: +$('s_todayPollSeconds').value,
+      schedulerPollSeconds: +$('s_schedulerPollSeconds').value,
+      pricePollSeconds: +$('s_pricePollSeconds').value,
+      solar: {
+        latitude: +$('s_lat').value,
+        longitude: +$('s_lon').value,
+        tiltDegrees: +$('s_tilt').value,
+        azimuthOpenMeteo: +$('s_az').value,
+        systemKw: +$('s_kw').value,
+        efficiencyFactor: +$('s_eff').value,
+        calibrationStartDate: $('s_calibStart').value || null,
+      },
+      battery: { capacityKwh: +$('s_batKwh').value },
+      notifications: {
+        ntfyTopic: $('s_ntfyTopic').value.trim() || null,
+        ntfyServer: $('s_ntfyServer').value.trim() || null,
+      },
+      flowPowerMarkup: {
+        lossFactor: +$('s_loss').value,
+        gstRate: +$('s_gst').value,
+        dailySupplyDollars: +$('s_supply').value,
+        feedInFlatCentsPerKwh: +$('s_fit').value,
+        tou: {
+          offPeak:  { flatCentsPerKwh: +$('s_tou_off').value, hours: $('s_tou_off_h').value.trim() },
+          shoulder: { flatCentsPerKwh: +$('s_tou_sh').value,  hours: $('s_tou_sh_h').value.trim() },
+          peak:     { flatCentsPerKwh: +$('s_tou_pk').value,  hours: $('s_tou_pk_h').value.trim() },
+        },
+      },
+    };
+    const r = await fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Admin-Password': adminPw },
+      body: JSON.stringify(payload),
+    });
+    if (r.status === 401) { errEl.textContent = 'Bad admin password. Please re-enter.'; sessionStorage.removeItem('adminPw'); adminPw = ''; showAuth(); return; }
+    if (!r.ok) { errEl.textContent = 'Save failed: ' + r.status; return; }
+    okEl.textContent = 'Saved. Reloading…';
+    setTimeout(() => location.reload(), 600);
+  }
+
+  $('settingsBtn').addEventListener('click', () => openSettings(true));
+
+  // Capture-phase interceptor: any click inside a locked control area opens the unlock prompt.
+  document.addEventListener('click', (e) => {
+    if (!document.body.classList.contains('locked')) return;
+    if (e.target.closest('.battery-controls, #schedTable')) {
+      e.stopPropagation();
+      e.preventDefault();
+      openUnlockPrompt();
+    }
+  }, true);
+  $('authCancel').addEventListener('click', closeSettings);
+  $('settingsCancel').addEventListener('click', closeSettings);
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) closeSettings(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && backdrop.classList.contains('show')) closeSettings(); });
+  $('authOk').addEventListener('click', async () => {
+    const pw = $('adminPw').value;
+    if (!pw) { errEl.textContent = 'Password required'; return; }
+    errEl.textContent = '';
+    if (!await verifyAdminPw(pw)) { errEl.textContent = 'Bad password'; return; }
+    adminPw = pw;
+    sessionStorage.setItem('adminPw', pw);
+    applyLockState(true);
+    if (unlockMode === 'unlock') {
+      closeSettings();
+      log('Controls unlocked.', 'ok');
+    } else {
+      try { await loadSettings(); } catch (e) { errEl.textContent = e.message; }
+    }
+  });
+  $('adminPw').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('authOk').click(); });
+  $('settingsSave').addEventListener('click', saveSettings);
+  $('ntfyTestBtn').addEventListener('click', async (e) => {
+    e.preventDefault();
+    errEl.textContent = ''; okEl.textContent = '';
+    const r = await fetch('/api/notify/test', { method: 'POST', headers: { 'X-Admin-Password': adminPw } });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok) okEl.textContent = 'Test sent — check your ntfy app.';
+    else errEl.textContent = j.error || 'Test failed.';
+  });
+  // Collapsible fieldsets (click the legend to toggle)
+  backdrop.querySelectorAll('fieldset legend').forEach((lg) => {
+    lg.addEventListener('click', () => lg.parentElement.classList.toggle('collapsed'));
+  });
+
+  // First-run: open settings automatically if Fox creds aren't configured yet.
+  if (cfg.configured === false) {
+    subEl.textContent = 'Welcome! Enter the admin password to finish setup.';
+    openSettings(false);
+  }
+})();
+</script>
+</body>
+</html>
