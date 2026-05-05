@@ -10,7 +10,7 @@ No npm dependencies. No build step. No database.
 
 <table>
   <tr>
-    <td><img src="screenshots/power-flow.png" width="220" alt="Live power flow"/><br/><sub><b>Live power flow</b> — animated connections, battery SoC ring, today's totals</sub></td>
+    <td><img src="screenshots/power-flow.jpg" width="220" alt="Live power flow"/><br/><sub><b>Live power flow</b> — animated connections, battery SoC ring, today's totals</sub></td>
     <td><img src="screenshots/todays-plan.png" width="220" alt="Today's Plan"/><br/><sub><b>Today's Plan</b> — midday recommendation engine with plain-English narrative</sub></td>
     <td><img src="screenshots/battery-control.png" width="220" alt="Battery Control"/><br/><sub><b>Battery Control</b> — force charge or dump to grid, auto-stop on SoC threshold</sub></td>
   </tr>
