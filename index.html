@@ -828,6 +828,16 @@ function spotToRetail(spotMwh, date) {
   return (spotC * mk.lossFactor + flat) * (1 + mk.gstRate);
 }
 
+// Battery temperature — track today's min/max (resets at midnight).
+let batTempMin = null, batTempMax = null, batTempDay = null;
+function updateBatTempStats(t) {
+  const today = new Date().toDateString();
+  if (batTempDay !== today) { batTempMin = null; batTempMax = null; batTempDay = today; }
+  if (t == null) return;
+  if (batTempMin == null || t < batTempMin) batTempMin = t;
+  if (batTempMax == null || t > batTempMax) batTempMax = t;
+}
+
 // ---------- fox ESS ----------
 const REAL_VARS = [
   'pvPower', 'SoC', 'soc', 'feedinPower', 'gridConsumptionPower',
@@ -878,7 +888,16 @@ async function loadLive() {
   $('n-bat').textContent = Math.abs(batNet).toFixed(2) + ' kW';
   $('n-bat-lbl').textContent = batNet > 0 ? 'Battery (charging)' : batNet < 0 ? 'Battery (discharging)' : 'Battery';
   const batTemp = pickVal(datas, 'batTemperature');
-  $('n-bat-temp').textContent = batTemp != null ? `${Math.round(batTemp)}°C` : '';
+  updateBatTempStats(batTemp);
+  if (batTemp != null) {
+    const cur = `${Math.round(batTemp)}°C`;
+    const range = (batTempMin != null && batTempMax != null && batTempMin !== batTempMax)
+      ? ` · ${Math.round(batTempMin)}–${Math.round(batTempMax)}° today`
+      : '';
+    $('n-bat-temp').textContent = cur + range;
+  } else {
+    $('n-bat-temp').textContent = '';
+  }
 
   if (soc != null) {
     $('soc').textContent = Math.round(soc);
