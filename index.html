@@ -136,6 +136,7 @@
   .node.grid.exporting .val { color: var(--green); }
   .node.load .val { color: var(--blue); }
   .node.bat .val { color: var(--purple); }
+  .node .temp { font-size: 11px; color: var(--muted); margin-top: 3px; letter-spacing: .3px; }
   .node.tl { grid-column: 1; grid-row: 1; justify-content: flex-end; flex-direction: row-reverse; text-align: right; }
   .node.tr { grid-column: 3; grid-row: 1; }
   .node.bl { grid-column: 1; grid-row: 2; justify-content: flex-end; flex-direction: row-reverse; text-align: right; }
@@ -527,6 +528,7 @@
           <div class="body">
             <div class="lbl" id="n-bat-lbl">Battery</div>
             <div class="val" id="n-bat">— kW</div>
+            <div class="temp" id="n-bat-temp"></div>
           </div>
         </div>
 
@@ -832,6 +834,7 @@ const REAL_VARS = [
   'loadsPower', 'generationPower',
   'batChargePower', 'batDischargePower',
   'invBatPower', 'batPower', 'meterPower2',
+  'batTemperature',
 ];
 const REPORT_VARS = ['generation', 'loads', 'feedin', 'gridConsumption', 'chargeEnergyToTal', 'dischargeEnergyToTal'];
 
@@ -874,6 +877,8 @@ async function loadLive() {
   $('n-grid-box').classList.toggle('exporting', gridNet < 0);
   $('n-bat').textContent = Math.abs(batNet).toFixed(2) + ' kW';
   $('n-bat-lbl').textContent = batNet > 0 ? 'Battery (charging)' : batNet < 0 ? 'Battery (discharging)' : 'Battery';
+  const batTemp = pickVal(datas, 'batTemperature');
+  $('n-bat-temp').textContent = batTemp != null ? `${Math.round(batTemp)}°C` : '';
 
   if (soc != null) {
     $('soc').textContent = Math.round(soc);
