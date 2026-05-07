@@ -544,7 +544,7 @@
         </div>
       </div>
 
-      <div class="bat-temp-bar" id="batTempBar" style="display:none">🌡 Battery <span class="cur" id="n-bat-temp-cur">—</span> · <span id="n-bat-temp-range"></span></div>
+      <div class="bat-temp-bar" id="batTempBar" style="display:none">🌡 Battery <span class="cur" id="n-bat-temp-cur">—</span><span id="n-bat-temp-range"></span></div>
       <div class="today-head"><h2>Today</h2><span class="net" id="todayNet"></span></div>
       <div class="today-wrap">
         <div class="tiles">
@@ -846,7 +846,7 @@ const REAL_VARS = [
   'loadsPower', 'generationPower',
   'batChargePower', 'batDischargePower',
   'invBatPower', 'batPower', 'meterPower2',
-  'batTemperature',
+  'batTemperature', 'ambientTemperation', 'batTemperature1', 'batTemperature2',
 ];
 const REPORT_VARS = ['generation', 'loads', 'feedin', 'gridConsumption', 'chargeEnergyToTal', 'dischargeEnergyToTal'];
 
@@ -889,15 +889,16 @@ async function loadLive() {
   $('n-grid-box').classList.toggle('exporting', gridNet < 0);
   $('n-bat').textContent = Math.abs(batNet).toFixed(2) + ' kW';
   $('n-bat-lbl').textContent = batNet > 0 ? 'Battery (charging)' : batNet < 0 ? 'Battery (discharging)' : 'Battery';
-  const batTemp = pickVal(datas, 'batTemperature');
+  const batTemp = pickVal(datas, 'batTemperature')
+    ?? pickVal(datas, 'ambientTemperation')
+    ?? pickVal(datas, 'batTemperature1')
+    ?? pickVal(datas, 'batTemperature2');
   updateBatTempStats(batTemp);
-  if (batTemp != null) {
-    $('n-bat-temp-cur').textContent = `${Math.round(batTemp)}°C`;
-    $('n-bat-temp-range').textContent = (batTempMin != null && batTempMax != null && batTempMin !== batTempMax)
-      ? `${Math.round(batTempMin)}–${Math.round(batTempMax)}° today`
-      : 'tracking min/max…';
-    $('batTempBar').style.display = '';
-  }
+  $('n-bat-temp-cur').textContent = batTemp != null ? `${Math.round(batTemp)}°C` : '—';
+  $('n-bat-temp-range').textContent = (batTempMin != null && batTempMax != null && batTempMin !== batTempMax)
+    ? ` · ${Math.round(batTempMin)}–${Math.round(batTempMax)}° today`
+    : '';
+  $('batTempBar').style.display = '';
 
   if (soc != null) {
     $('soc').textContent = Math.round(soc);
