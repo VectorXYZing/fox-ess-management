@@ -544,7 +544,7 @@
         </div>
       </div>
 
-      <div class="bat-temp-bar" id="batTempBar" style="display:none">🌡 Battery <span class="cur" id="n-bat-temp-cur">—</span><span id="n-bat-temp-range"></span></div>
+      <div class="bat-temp-bar" id="batTempBar">🌡 Battery <span class="cur" id="n-bat-temp-cur">—</span><span id="n-bat-temp-range"></span></div>
       <div class="today-head"><h2>Today</h2><span class="net" id="todayNet"></span></div>
       <div class="today-wrap">
         <div class="tiles">
@@ -898,7 +898,6 @@ async function loadLive() {
   $('n-bat-temp-range').textContent = (batTempMin != null && batTempMax != null && batTempMin !== batTempMax)
     ? ` · ${Math.round(batTempMin)}–${Math.round(batTempMax)}° today`
     : '';
-  $('batTempBar').style.display = '';
 
   if (soc != null) {
     $('soc').textContent = Math.round(soc);
