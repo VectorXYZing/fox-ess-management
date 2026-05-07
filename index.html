@@ -147,6 +147,8 @@
   .soc-ring .pct .big { font-size: 46px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -1px; line-height: 1; }
   .soc-ring .pct .big .pc { font-size: 22px; font-weight: 500; color: var(--muted); margin-left: 2px; }
   .soc-ring .pct small { display: block; font-size: 10px; font-weight: 500; color: var(--muted); text-transform: uppercase; letter-spacing: 1.5px; margin-top: 6px; }
+  .bat-temp-bar { text-align: center; font-size: 12px; color: var(--muted); margin: 8px 0 4px; letter-spacing: .3px; }
+  .bat-temp-bar .cur { color: var(--text); font-weight: 600; }
   .today-head { display: flex; align-items: baseline; justify-content: center; gap: 14px; margin: 10px 0 14px; }
   .today-head h2 { margin: 0; }
   .today-head .net { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -528,7 +530,6 @@
           <div class="body">
             <div class="lbl" id="n-bat-lbl">Battery</div>
             <div class="val" id="n-bat">— kW</div>
-            <div class="temp" id="n-bat-temp"></div>
           </div>
         </div>
 
@@ -543,6 +544,7 @@
         </div>
       </div>
 
+      <div class="bat-temp-bar" id="batTempBar" style="display:none">🌡 Battery <span class="cur" id="n-bat-temp-cur">—</span> · <span id="n-bat-temp-range"></span></div>
       <div class="today-head"><h2>Today</h2><span class="net" id="todayNet"></span></div>
       <div class="today-wrap">
         <div class="tiles">
@@ -890,13 +892,11 @@ async function loadLive() {
   const batTemp = pickVal(datas, 'batTemperature');
   updateBatTempStats(batTemp);
   if (batTemp != null) {
-    const cur = `${Math.round(batTemp)}°C`;
-    const range = (batTempMin != null && batTempMax != null && batTempMin !== batTempMax)
-      ? ` · ${Math.round(batTempMin)}–${Math.round(batTempMax)}° today`
-      : '';
-    $('n-bat-temp').textContent = cur + range;
-  } else {
-    $('n-bat-temp').textContent = '';
+    $('n-bat-temp-cur').textContent = `${Math.round(batTemp)}°C`;
+    $('n-bat-temp-range').textContent = (batTempMin != null && batTempMax != null && batTempMin !== batTempMax)
+      ? `${Math.round(batTempMin)}–${Math.round(batTempMax)}° today`
+      : 'tracking min/max…';
+    $('batTempBar').style.display = '';
   }
 
   if (soc != null) {
