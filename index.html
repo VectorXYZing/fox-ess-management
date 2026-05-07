@@ -1494,7 +1494,7 @@ function fromApiGroup(g) {
   };
 }
 
-/** Convert our internal flat group back to the v3 API wire format. */
+/** Convert our internal flat group to v3 wire format (extraParam wrapper). */
 function toV3Group(g) {
   const out = {
     startHour: g.startHour, startMinute: g.startMinute,
@@ -1511,13 +1511,69 @@ function toV3Group(g) {
   return out;
 }
 
-async function readScheduler() {
-  const r = await api('/api/fox/op/v3/device/scheduler/get', {});
-  if (r.errno !== 0) throw new Error('scheduler/get: ' + (r.msg || JSON.stringify(r)));
+/** Convert our internal flat group to v1 wire format (flat fields + enable). */
+function toV1Group(g) {
   return {
-    enable       : r.result?.enable        ?? 1,
-    maxGroupCount: r.result?.maxGroupCount ?? 8,
-    groups       : (r.result?.groups || []).map(fromApiGroup),
+    enable      : g.enable ?? 1,
+    startHour   : g.startHour, startMinute: g.startMinute,
+    endHour     : g.endHour,   endMinute  : g.endMinute,
+    workMode    : g.workMode,
+    fdSoc       : g.fdSoc        ?? 100,
+    fdPwr       : g.fdPwr        ?? 5000,
+    maxSoc      : g.maxSoc       ?? 100,
+    minSocOnGrid: g.minSocOnGrid ?? 10,
+  };
+}
+
+/** Write groups using whichever API version was detected by readScheduler(). */
+async function writeScheduler(groups) {
+  if (_schedulerApiVer === 'v1') {
+    return api('/api/fox/op/v1/device/scheduler/enable', { enable: 1, groups: groups.map(toV1Group) });
+  }
+  return api('/api/fox/op/v3/device/scheduler/enable', { groups: groups.map(toV3Group), isDefault: false });
+}
+
+// Which scheduler API version this firmware supports (detected on first read).
+let _schedulerApiVer = null;
+
+async function readScheduler() {
+  // Try v3 first; fall back to v1 if this firmware doesn't support it yet.
+  // Cache the working version so we don't re-probe on every call.
+  if (_schedulerApiVer !== 'v1') {
+    const r3 = await api('/api/fox/op/v3/device/scheduler/get', {});
+    if (r3.errno === 0) {
+      _schedulerApiVer = 'v3';
+      return {
+        enable       : r3.result?.enable        ?? 1,
+        maxGroupCount: r3.result?.maxGroupCount ?? 8,
+        groups       : (r3.result?.groups || []).map(fromApiGroup),
+        apiVer       : 'v3',
+      };
+    }
+    // v3 unsupported — lock to v1 for this session
+    log(`Scheduler v3 not supported (${r3.errno}: ${r3.msg}) — using v1`, 'err');
+    _schedulerApiVer = 'v1';
+  }
+
+  // v1 fallback — note: some firmwares return enable:0 for all groups even
+  // when active; treat every non-blank slot as enabled.
+  const r1 = await api('/api/fox/op/v1/device/scheduler/get', {});
+  if (r1.errno !== 0) throw new Error('scheduler/get v1: ' + (r1.msg || JSON.stringify(r1)));
+  const groups = (r1.result?.groups || []).map((g) => {
+    const norm = fromApiGroup(g);
+    // Firmware quirk: v1 reports enable:0 on active slots. Trust the window
+    // instead — a non-zero window on a non-SelfUse slot is always "enabled".
+    if (!norm.enable && norm.workMode !== 'SelfUse' &&
+        !(norm.startHour === 0 && norm.startMinute === 0 && norm.endHour === 0 && norm.endMinute === 0)) {
+      norm.enable = 1;
+    }
+    return norm;
+  });
+  return {
+    enable       : r1.result?.enable ?? 1,
+    maxGroupCount: r1.result?.maxGroupCount ?? 8,
+    groups,
+    apiVer       : 'v1',
   };
 }
 
@@ -1620,18 +1676,17 @@ async function forceChargeNow() {
     return;
   }
 
-  // In v3, ForceCharge(BAT) is just ForceCharge; fdSoc = charge-up-to target.
   filtered.push({
     enable: 1,
     startHour: start.getHours(), startMinute: start.getMinutes(),
     endHour: end.getHours(), endMinute: end.getMinutes(),
-    workMode: 'ForceCharge',
+    workMode: 'ForceCharge(BAT)',
     fdSoc: targetSoc, fdPwr: rateW,
     minSocOnGrid: 10, maxSoc: targetSoc,
   });
 
   log(`Force charge → ${pad2(start.getHours())}:${pad2(start.getMinutes())} → ${pad2(end.getHours())}:${pad2(end.getMinutes())} to ${targetSoc}% @ ${rateKw.toFixed(1)}kW …`);
-  const r = await api('/api/fox/op/v3/device/scheduler/enable', { groups: filtered.map(toV3Group), isDefault: false });
+  const r = await writeScheduler(filtered);
   if (r.errno !== 0) { log(`scheduler/enable failed: ${r.msg || JSON.stringify(r)}`, 'err'); return; }
 
   await new Promise((res) => setTimeout(res, 1500));
@@ -1659,7 +1714,7 @@ async function stopForce() {
   const filtered = groups.filter((g) => !isAnyForcedMode(g));
   const cleared = groups.length - filtered.length;
   if (cleared === 0) { log('No active forced slot to clear.', 'ok'); return; }
-  const r = await api('/api/fox/op/v3/device/scheduler/enable', { groups: filtered.map(toV3Group), isDefault: false });
+  const r = await writeScheduler(filtered);
   if (r.errno === 0) log(`Cleared ${cleared} forced slot(s); other slots untouched ✓`, 'ok');
   else log('stop failed: ' + (r.msg || JSON.stringify(r)), 'err');
 }
@@ -1696,7 +1751,7 @@ async function forceDumpNow() {
   });
 
   log(`Dump to grid → ${pad2(start.getHours())}:${pad2(start.getMinutes())} → ${pad2(end.getHours())}:${pad2(end.getMinutes())} to ${reserveSoc}% floor @ ${rateKw.toFixed(1)}kW …`);
-  const r = await api('/api/fox/op/v3/device/scheduler/enable', { groups: filtered.map(toV3Group), isDefault: false });
+  const r = await writeScheduler(filtered);
   if (r.errno !== 0) { log(`scheduler/enable failed: ${r.msg || JSON.stringify(r)}`, 'err'); return; }
 
   await new Promise((res) => setTimeout(res, 1500));
