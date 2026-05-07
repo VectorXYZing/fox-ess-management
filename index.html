@@ -1796,11 +1796,18 @@ async function diagnose() {
   }
 
   // 2. Broad real-time variable sweep — see which names your device actually returns.
+  // Includes every known temperature variable so we can find which one matches the Fox app.
   const allVars = [
     'pvPower', 'pv1Power', 'pv2Power', 'soc', 'SoC', 'batterySoc', 'bmsSoc',
     'feedinPower', 'gridConsumptionPower', 'loadsPower', 'generationPower',
     'batChargePower', 'batDischargePower', 'invBatPower', 'batPower',
-    'meterPower', 'meterPower2', 'batTemperature', 'ambientTemperation', 'invTemperation',
+    'meterPower', 'meterPower2',
+    // every temperature variable the Fox API documents:
+    'batTemperature', 'chargeTemperature', 'ambientTemperation',
+    'invTemperation', 'boostTemperation', 'dspTemperature',
+    // speculative battery-cell variants:
+    'batTemperature1', 'batTemperature2', 'bmsTemperature', 'cellTemperature',
+    'minCellTemperature', 'maxCellTemperature', 'batCellTemp',
     'RCurrent', 'RVolt', 'RPower', 'RFreq',
   ];
   try {
@@ -1811,10 +1818,31 @@ async function diagnose() {
         .filter((d) => d.value != null && d.value !== '')
         .map((d) => `${d.variable}=${d.value}${d.unit || ''}`);
       log(`real-time keys returned (${present.length}): ${present.join(', ')}`, 'ok');
+      const temps = datas.filter((d) => /temp/i.test(d.variable) && d.value != null && d.value !== '');
+      if (temps.length) log(`temperature values: ${temps.map((d) => `${d.variable}=${d.value}${d.unit||''}`).join(', ')}`, 'ok');
     } else {
       log(`real-time sweep FAIL errno=${r.errno} msg=${r.msg}`, 'err');
     }
   } catch (e) { log(`real-time threw: ${e.message}`, 'err'); }
+
+  // 2b. Try battery-specific endpoints — the Fox app's "Temp." comes from a
+  // battery-level call (battery has its own SN, separate from the inverter).
+  const batEndpoints = [
+    '/api/fox/op/v0/device/battery/info',
+    '/api/fox/op/v0/device/battery/info/get',
+    '/api/fox/op/v0/device/bms/info',
+    '/api/fox/op/v0/device/battery/soc/get',
+    '/api/fox/op/v1/device/battery/info',
+    '/api/fox/op/v0/device/list',
+  ];
+  for (const url of batEndpoints) {
+    try {
+      const r = await api(url, {});
+      const tag = url.replace('/api/fox', '');
+      if (r.errno === 0) log(`${tag} OK: ${JSON.stringify(r.result).slice(0, 400)}`, 'ok');
+      else log(`${tag} errno=${r.errno} msg=${r.msg}`, 'err');
+    } catch (e) {}
+  }
 
   // 3. AEMO forecast sanity
   try {
