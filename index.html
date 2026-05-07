@@ -147,8 +147,6 @@
   .soc-ring .pct .big { font-size: 46px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -1px; line-height: 1; }
   .soc-ring .pct .big .pc { font-size: 22px; font-weight: 500; color: var(--muted); margin-left: 2px; }
   .soc-ring .pct small { display: block; font-size: 10px; font-weight: 500; color: var(--muted); text-transform: uppercase; letter-spacing: 1.5px; margin-top: 6px; }
-  .bat-temp-bar { text-align: center; font-size: 12px; color: var(--muted); margin: 8px 0 4px; letter-spacing: .3px; }
-  .bat-temp-bar .cur { color: var(--text); font-weight: 600; }
   .today-head { display: flex; align-items: baseline; justify-content: center; gap: 14px; margin: 10px 0 14px; }
   .today-head h2 { margin: 0; }
   .today-head .net { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -544,7 +542,6 @@
         </div>
       </div>
 
-      <div class="bat-temp-bar" id="batTempBar">🌡 Battery <span class="cur" id="n-bat-temp-cur">—</span><span id="n-bat-temp-range"></span></div>
       <div class="today-head"><h2>Today</h2><span class="net" id="todayNet"></span></div>
       <div class="today-wrap">
         <div class="tiles">
@@ -830,23 +827,12 @@ function spotToRetail(spotMwh, date) {
   return (spotC * mk.lossFactor + flat) * (1 + mk.gstRate);
 }
 
-// Battery temperature — track today's min/max (resets at midnight).
-let batTempMin = null, batTempMax = null, batTempDay = null;
-function updateBatTempStats(t) {
-  const today = new Date().toDateString();
-  if (batTempDay !== today) { batTempMin = null; batTempMax = null; batTempDay = today; }
-  if (t == null) return;
-  if (batTempMin == null || t < batTempMin) batTempMin = t;
-  if (batTempMax == null || t > batTempMax) batTempMax = t;
-}
-
 // ---------- fox ESS ----------
 const REAL_VARS = [
   'pvPower', 'SoC', 'soc', 'feedinPower', 'gridConsumptionPower',
   'loadsPower', 'generationPower',
   'batChargePower', 'batDischargePower',
   'invBatPower', 'batPower', 'meterPower2',
-  'chargeTemperature', 'batTemperature', 'ambientTemperation',
 ];
 const REPORT_VARS = ['generation', 'loads', 'feedin', 'gridConsumption', 'chargeEnergyToTal', 'dischargeEnergyToTal'];
 
@@ -889,16 +875,9 @@ async function loadLive() {
   $('n-grid-box').classList.toggle('exporting', gridNet < 0);
   $('n-bat').textContent = Math.abs(batNet).toFixed(2) + ' kW';
   $('n-bat-lbl').textContent = batNet > 0 ? 'Battery (charging)' : batNet < 0 ? 'Battery (discharging)' : 'Battery';
-  // chargeTemperature = BMS cell temp (matches Fox app "Temp." display)
-  // batTemperature = inverter-side sensor (fallback)
-  const batTemp = pickVal(datas, 'chargeTemperature')
-    ?? pickVal(datas, 'batTemperature')
-    ?? pickVal(datas, 'ambientTemperation');
-  updateBatTempStats(batTemp);
-  $('n-bat-temp-cur').textContent = batTemp != null ? `${Math.round(batTemp)}°C` : '—';
-  $('n-bat-temp-range').textContent = (batTempMin != null && batTempMax != null && batTempMin !== batTempMax)
-    ? ` · ${Math.round(batTempMin)}–${Math.round(batTempMax)}° today`
-    : '';
+  // Note: battery cell temperature is not exposed via the Open API for this
+  // inverter family. batTemperature/ambientTemperation/invTemperation are
+  // inverter-side sensors and don't match the BMS cell temp the Fox app shows.
 
   if (soc != null) {
     $('soc').textContent = Math.round(soc);
