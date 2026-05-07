@@ -846,7 +846,7 @@ const REAL_VARS = [
   'loadsPower', 'generationPower',
   'batChargePower', 'batDischargePower',
   'invBatPower', 'batPower', 'meterPower2',
-  'batTemperature', 'ambientTemperation', 'batTemperature1', 'batTemperature2',
+  'chargeTemperature', 'batTemperature', 'ambientTemperation',
 ];
 const REPORT_VARS = ['generation', 'loads', 'feedin', 'gridConsumption', 'chargeEnergyToTal', 'dischargeEnergyToTal'];
 
@@ -889,10 +889,11 @@ async function loadLive() {
   $('n-grid-box').classList.toggle('exporting', gridNet < 0);
   $('n-bat').textContent = Math.abs(batNet).toFixed(2) + ' kW';
   $('n-bat-lbl').textContent = batNet > 0 ? 'Battery (charging)' : batNet < 0 ? 'Battery (discharging)' : 'Battery';
-  const batTemp = pickVal(datas, 'batTemperature')
-    ?? pickVal(datas, 'ambientTemperation')
-    ?? pickVal(datas, 'batTemperature1')
-    ?? pickVal(datas, 'batTemperature2');
+  // chargeTemperature = BMS cell temp (matches Fox app "Temp." display)
+  // batTemperature = inverter-side sensor (fallback)
+  const batTemp = pickVal(datas, 'chargeTemperature')
+    ?? pickVal(datas, 'batTemperature')
+    ?? pickVal(datas, 'ambientTemperation');
   updateBatTempStats(batTemp);
   $('n-bat-temp-cur').textContent = batTemp != null ? `${Math.round(batTemp)}°C` : '—';
   $('n-bat-temp-range').textContent = (batTempMin != null && batTempMax != null && batTempMin !== batTempMax)
