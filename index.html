@@ -998,17 +998,24 @@ async function loadToday() {
     todayHourlyGen = pvDirect.values.map((v) => Number(v) || 0);
     log(`solar: using direct variable "${pvDirect.variable}" for PV.`, 'ok');
   } else {
-    // Derived formula: PV = max(0, generation − discharge) + charge.
-    // `generation` can include battery-to-AC flow; subtracting `discharge` removes
-    // that while keeping the PV-to-AC portion. Adding `charge` recovers PV that
-    // went straight to the battery (DC-coupled) and isn't in `generation`.
-    const gen = hourly('generation');
-    const chg = hourly('chargeEnergyToTal');
-    const dis = hourly('dischargeEnergyToTal');
-    const len = Math.max(gen.length, chg.length, dis.length);
+    // Derived formula:
+    //   solar-to-AC   = max(0, generation − discharge)
+    //   solar-to-bat  = max(0, charge − gridConsumption)
+    //   total solar   = solar-to-AC + solar-to-bat
+    //
+    // The naive formula (gen − dis + charge) incorrectly treats grid-to-battery
+    // charging (force charge) as solar. Subtracting gridConsumption from the
+    // charge term isolates only the PV portion of battery charging.
+    const gen  = hourly('generation');
+    const chg  = hourly('chargeEnergyToTal');
+    const dis  = hourly('dischargeEnergyToTal');
+    const grid = hourly('gridConsumption');
+    const len  = Math.max(gen.length, chg.length, dis.length);
     todayHourlyGen = Array.from({ length: len }, (_, i) =>
-      Math.max(0, (gen[i] || 0) - (dis[i] || 0)) + (chg[i] || 0)
+      Math.max(0, (gen[i] || 0) - (dis[i] || 0)) +
+      Math.max(0, (chg[i] || 0) - (grid[i] || 0))
     );
+    log('solar: using derived formula (gen − dis + max(0, chg − grid)).', 'ok');
   }
   // Also update today totals tiles to use the derived PV total (more accurate)
   const derivedPvToday = todayHourlyGen.reduce((a, b) => a + b, 0);
