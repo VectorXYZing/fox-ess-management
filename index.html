@@ -1184,6 +1184,7 @@ async function loadSolar() {
   // Open-Meteo returns naive local-time ISO strings (no TZ). Parse as local.
   solarForecast = r.points.map((p) => ({
     t: new Date(p.t.replace(' ', 'T')),
+    localHour: Number(p.t.slice(11, 13)), // parse hour from naive local string, not from Date (UTC host shifts it)
     predictedKw: p.predictedKw,
     gti: p.gti,
     cloud: p.cloud,
@@ -1302,7 +1303,7 @@ function drawSolarChart() {
     // Look up this hour's actual generation from the today report (kWh == kW for 1h bar).
     let actualKw = null;
     if (isToday && isPast && todayHourlyGen.length === 24) {
-      actualKw = todayHourlyGen[p.t.getHours()];
+      actualKw = todayHourlyGen[p.localHour];
     }
 
     const tLabel = fmtWhen(p.t);
