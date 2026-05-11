@@ -1682,17 +1682,48 @@ async function refreshSchedulerPanel() {
     } else {
       $('schedActive').textContent = 'none — running default Self-use';
     }
-    let html = '<thead><tr><th>#</th><th>Mode</th><th>Window</th><th>Rate</th><th>Cut-off</th><th>Max</th></tr></thead><tbody>';
+    let html = '<thead><tr><th>#</th><th>Mode</th><th>Window</th><th>Rate</th><th>Cut-off</th><th>Max</th><th style="width:90px"></th></tr></thead><tbody>';
     s.groups.forEach((g, i) => {
       const active = groupMatchesNow(g, nowM);
       const cls = active ? 'active' : (g.enable ? 'on' : '');
       const win = g.isRemainMode
         ? '00:00–23:59 (default)'
         : `${pad2(g.startHour)}:${pad2(g.startMinute)}–${pad2(g.endHour)}:${pad2(g.endMinute)}`;
-      html += `<tr class="${cls}"><td>${i}</td><td>${g.workMode}</td><td>${win}</td><td>${(g.fdPwr/1000).toFixed(1)}kW</td><td>${g.fdSoc}%</td><td>${g.maxSoc ?? '—'}%</td></tr>`;
+      // Show a "💾 Save" button on real slots that aren't already saved.
+      // isRemainMode (00:00-23:59 default) isn't savable.
+      let action = '';
+      if (!g.isRemainMode) {
+        const alreadySaved = savedPresets.some((p) =>
+          p.workMode === g.workMode
+          && p.startHour === g.startHour && p.startMinute === g.startMinute
+          && p.endHour   === g.endHour   && p.endMinute   === g.endMinute);
+        action = alreadySaved
+          ? '<span class="hint" style="font-size:11px">✓ saved</span>'
+          : `<button class="sched-save-row" data-idx="${i}" title="Save as preset">💾 Save</button>`;
+      }
+      html += `<tr class="${cls}"><td>${i}</td><td>${g.workMode}</td><td>${win}</td><td>${(g.fdPwr/1000).toFixed(1)}kW</td><td>${g.fdSoc}%</td><td>${g.maxSoc ?? '—'}%</td><td>${action}</td></tr>`;
     });
     html += '</tbody>';
     $('schedTable').innerHTML = html;
+    // Wire up "Save as preset" buttons
+    $('schedTable').querySelectorAll('.sched-save-row').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const idx = Number(e.target.dataset.idx);
+        const g = s.groups[idx];
+        if (!g) return;
+        if (!adminPw) { openUnlockPrompt(); return; }
+        // Open the edit modal pre-filled from this slot so user can name it.
+        openSavedEditModal(null, {
+          label: '',
+          workMode: g.workMode,
+          startHour: g.startHour, startMinute: g.startMinute,
+          endHour: g.endHour, endMinute: g.endMinute,
+          fdPwr: g.fdPwr, fdSoc: g.fdSoc,
+          minSocOnGrid: g.minSocOnGrid || 10,
+          maxSoc: g.maxSoc || 100,
+        });
+      });
+    });
   } catch (e) { log('scheduler refresh failed: ' + e.message, 'err'); }
 }
 
@@ -1907,19 +1938,24 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-function openSavedEditModal(id) {
+function openSavedEditModal(id, prefill) {
   const isNew = !id;
   _savedEditingId = id;
-  const p = isNew ? {
+  const defaults = {
     id: 'preset-' + Date.now(),
     label: '',
     workMode: 'ForceDischarge',
     startHour: 17, startMinute: 30, endHour: 19, endMinute: 30,
     fdPwr: 10500, fdSoc: 20, minSocOnGrid: 10, maxSoc: 100,
     enabled: true,
-  } : savedPresets.find((x) => x.id === id);
+  };
+  const p = isNew
+    ? { ...defaults, ...(prefill || {}) }
+    : savedPresets.find((x) => x.id === id);
   if (!p) return;
-  $('savedEditTitle').textContent = isNew ? 'Add saved schedule' : 'Edit saved schedule';
+  $('savedEditTitle').textContent = isNew
+    ? (prefill ? 'Save inverter slot as preset' : 'Add saved schedule')
+    : 'Edit saved schedule';
   $('savedEditDelete').style.display = isNew ? 'none' : '';
   $('se_label').value = p.label || '';
   $('se_workMode').value = p.workMode;
@@ -1966,14 +2002,22 @@ async function saveSavedEditModal() {
     preset.enabled = existing.enabled;
     Object.assign(existing, preset);
   }
-  if (await persistSavedPresets()) { closeSavedEditModal(); renderSavedPresets(); }
+  if (await persistSavedPresets()) {
+    closeSavedEditModal();
+    renderSavedPresets();
+    refreshSchedulerPanel().catch(() => {});
+  }
 }
 
 async function deleteSavedEditModal() {
   const id = _savedEditingId;
   if (!id) return;
   savedPresets = savedPresets.filter((x) => x.id !== id);
-  if (await persistSavedPresets()) { closeSavedEditModal(); renderSavedPresets(); }
+  if (await persistSavedPresets()) {
+    closeSavedEditModal();
+    renderSavedPresets();
+    refreshSchedulerPanel().catch(() => {});
+  }
 }
 
 // Sync enabled presets to the Fox scheduler. Existing slots that match
