@@ -2826,7 +2826,7 @@ $('recRefresh').addEventListener('click', () => loadRecommendation().catch((e) =
       setTimeout(() => $('adminPw').focus(), 30);
     }
   }
-  function openUnlockPrompt() {
+  window.openUnlockPrompt = function openUnlockPrompt() {
     errEl.textContent = '';
     okEl.textContent = '';
     unlockMode = 'unlock';
@@ -2834,7 +2834,7 @@ $('recRefresh').addEventListener('click', () => loadRecommendation().catch((e) =
     showAuth();
     subEl.textContent = 'Enter the admin password to unlock controls.';
     setTimeout(() => $('adminPw').focus(), 30);
-  }
+  };
   function closeSettings() { backdrop.classList.remove('show'); }
   function showAuth() {
     authPane.style.display = '';
