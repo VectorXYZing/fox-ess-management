@@ -1918,13 +1918,24 @@ async function loadSavedPresets() {
 }
 
 async function persistSavedPresets() {
-  if (!adminPw) { openUnlockPrompt(); return false; }
+  if (!adminPw) {
+    log('Admin password required — opening unlock prompt. Click Save again after unlocking.', 'err');
+    openUnlockPrompt();
+    return false;
+  }
   const r = await fetch('/api/saved-schedules', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Admin-Password': adminPw },
     body: JSON.stringify({ presets: savedPresets }),
   });
-  if (r.status === 401) { openUnlockPrompt(); return false; }
+  if (r.status === 401) {
+    log('Saved password rejected — please re-enter. Click Save again after unlocking.', 'err');
+    // clear so the user is forced to re-enter rather than re-trying with the bad pw
+    sessionStorage.removeItem('adminPw');
+    adminPw = '';
+    openUnlockPrompt();
+    return false;
+  }
   if (!r.ok) { log('Save presets failed: ' + r.status, 'err'); return false; }
   return true;
 }
