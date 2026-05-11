@@ -485,7 +485,7 @@
     <div class="modal" style="max-width:480px">
       <h2 id="savedEditTitle">Edit saved schedule</h2>
       <div class="sub">Define a regular slot to keep on the inverter.</div>
-      <label class="full">Label
+      <label class="full" id="se_label_wrap">Label
         <input type="text" id="se_label" placeholder="e.g. Evening peak dump" />
       </label>
       <label class="full">Mode
@@ -512,6 +512,10 @@
       <div class="hint" style="margin-top:6px">
         <b>fdSoC</b> = target SoC. For ForceDischarge it's the floor (stop discharging at this %). For ForceCharge it's the ceiling (charge up to this %).
       </div>
+      <label class="full" id="se_asPresetWrap" style="display:none;margin-top:8px">
+        <input type="checkbox" id="se_asPreset" style="margin-right:6px" />
+        Also save as preset (lets you restore this slot later via Saved Schedules)
+      </label>
       <div class="err" id="savedEditErr"></div>
       <div class="actions">
         <button id="savedEditDelete" style="margin-right:auto;color:var(--red)">Delete</button>
@@ -1682,50 +1686,49 @@ async function refreshSchedulerPanel() {
     } else {
       $('schedActive').textContent = 'none — running default Self-use';
     }
-    let html = '<thead><tr><th>#</th><th>Mode</th><th>Window</th><th>Rate</th><th>Cut-off</th><th>Max</th><th style="width:90px"></th></tr></thead><tbody>';
+    // Cache current groups so live-slot edit/delete can reference them by index
+    _currentSchedGroups = s.groups;
+    let html = '<thead><tr><th>#</th><th>Mode</th><th>Window</th><th>Rate</th><th>Cut-off</th><th>Max</th><th style="width:120px;text-align:right">Actions</th></tr></thead><tbody>';
     s.groups.forEach((g, i) => {
       const active = groupMatchesNow(g, nowM);
       const cls = active ? 'active' : (g.enable ? 'on' : '');
       const win = g.isRemainMode
         ? '00:00–23:59 (default)'
         : `${pad2(g.startHour)}:${pad2(g.startMinute)}–${pad2(g.endHour)}:${pad2(g.endMinute)}`;
-      // Show a "💾 Save" button on real slots that aren't already saved.
-      // isRemainMode (00:00-23:59 default) isn't savable.
-      let action = '';
-      if (!g.isRemainMode) {
-        const alreadySaved = savedPresets.some((p) =>
-          p.workMode === g.workMode
-          && p.startHour === g.startHour && p.startMinute === g.startMinute
-          && p.endHour   === g.endHour   && p.endMinute   === g.endMinute);
-        action = alreadySaved
-          ? '<span class="hint" style="font-size:11px">✓ saved</span>'
-          : `<button class="sched-save-row" data-idx="${i}" title="Save as preset">💾 Save</button>`;
-      }
-      html += `<tr class="${cls}"><td>${i}</td><td>${g.workMode}</td><td>${win}</td><td>${(g.fdPwr/1000).toFixed(1)}kW</td><td>${g.fdSoc}%</td><td>${g.maxSoc ?? '—'}%</td><td>${action}</td></tr>`;
+      // isRemainMode is the v3 catch-all and can't be edited/deleted directly.
+      const action = g.isRemainMode
+        ? '<span class="hint" style="font-size:11px">auto</span>'
+        : `<button class="sched-edit-row" data-idx="${i}" title="Edit slot">✎ Edit</button>
+           <button class="sched-del-row"  data-idx="${i}" title="Delete slot from inverter" style="margin-left:4px;color:var(--red)">🗑</button>`;
+      html += `<tr class="${cls}"><td>${i}</td><td>${g.workMode}</td><td>${win}</td><td>${(g.fdPwr/1000).toFixed(1)}kW</td><td>${g.fdSoc}%</td><td>${g.maxSoc ?? '—'}%</td><td style="text-align:right">${action}</td></tr>`;
     });
     html += '</tbody>';
     $('schedTable').innerHTML = html;
-    // Wire up "Save as preset" buttons
-    $('schedTable').querySelectorAll('.sched-save-row').forEach((btn) => {
+    // Wire up Edit + Delete buttons
+    $('schedTable').querySelectorAll('.sched-edit-row').forEach((btn) => {
       btn.addEventListener('click', (e) => {
-        const idx = Number(e.target.dataset.idx);
-        const g = s.groups[idx];
-        if (!g) return;
         if (!adminPw) { openUnlockPrompt(); return; }
-        // Open the edit modal pre-filled from this slot so user can name it.
-        openSavedEditModal(null, {
-          label: '',
-          workMode: g.workMode,
-          startHour: g.startHour, startMinute: g.startMinute,
-          endHour: g.endHour, endMinute: g.endMinute,
-          fdPwr: g.fdPwr, fdSoc: g.fdSoc,
-          minSocOnGrid: g.minSocOnGrid || 10,
-          maxSoc: g.maxSoc || 100,
-        });
+        const idx = Number(e.target.dataset.idx);
+        openLiveSlotEditor(idx);
+      });
+    });
+    $('schedTable').querySelectorAll('.sched-del-row').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        if (!adminPw) { openUnlockPrompt(); return; }
+        const idx = Number(e.target.dataset.idx);
+        const g = _currentSchedGroups[idx];
+        if (!g) return;
+        const win = `${pad2(g.startHour)}:${pad2(g.startMinute)}–${pad2(g.endHour)}:${pad2(g.endMinute)}`;
+        if (!confirm(`Delete ${g.workMode} ${win} from inverter?`)) return;
+        await deleteLiveSlot(idx).catch((err) => log('delete: ' + err.message, 'err'));
       });
     });
   } catch (e) { log('scheduler refresh failed: ' + e.message, 'err'); }
 }
+
+// Cached groups from the most recent readScheduler() — used by edit/delete
+// buttons in the live scheduler table.
+let _currentSchedGroups = [];
 
 async function forceChargeNow() {
   const mins = pickedMinutes();
@@ -1862,6 +1865,10 @@ async function applyMinSoc() {
 // presets into the Fox scheduler, preserving any other manual slots.
 let savedPresets = [];
 let _savedEditingId = null;
+// Editor mode: 'preset' (edit a saved schedule) or 'liveSlot' (edit a slot
+// directly on the inverter). Determines what Save / Delete do.
+let _editorMode = 'preset';
+let _editorLiveIdx = null;
 
 async function loadSavedPresets() {
   if (!adminPw) { renderSavedPresets(); return; }
@@ -1939,6 +1946,8 @@ function escapeHtml(s) {
 }
 
 function openSavedEditModal(id, prefill) {
+  _editorMode = 'preset';
+  _editorLiveIdx = null;
   const isNew = !id;
   _savedEditingId = id;
   const defaults = {
@@ -1957,6 +1966,9 @@ function openSavedEditModal(id, prefill) {
     ? (prefill ? 'Save inverter slot as preset' : 'Add saved schedule')
     : 'Edit saved schedule';
   $('savedEditDelete').style.display = isNew ? 'none' : '';
+  $('savedEditDelete').textContent = 'Delete';
+  $('se_label_wrap').style.display = '';
+  $('se_asPresetWrap').style.display = 'none';
   $('se_label').value = p.label || '';
   $('se_workMode').value = p.workMode;
   $('se_start').value = `${pad2(p.startHour)}:${pad2(p.startMinute)}`;
@@ -1971,14 +1983,53 @@ function openSavedEditModal(id, prefill) {
 
 function closeSavedEditModal() { $('savedEditBackdrop').classList.remove('show'); }
 
-async function saveSavedEditModal() {
-  const id = _savedEditingId;
-  const isNew = !savedPresets.find((x) => x.id === id);
+// Open the editor for a slot on the inverter (Edit button on a scheduler row).
+function openLiveSlotEditor(idx) {
+  const g = _currentSchedGroups[idx];
+  if (!g) return;
+  _editorMode = 'liveSlot';
+  _editorLiveIdx = idx;
+  _savedEditingId = null;
+  $('savedEditTitle').textContent = `Edit inverter slot ${idx}`;
+  $('savedEditDelete').style.display = '';
+  $('savedEditDelete').textContent = 'Delete from inverter';
+  $('se_label_wrap').style.display = 'none';
+  $('se_asPresetWrap').style.display = '';
+  $('se_asPreset').checked = false;
+  $('se_workMode').value = g.workMode;
+  $('se_start').value = `${pad2(g.startHour)}:${pad2(g.startMinute)}`;
+  $('se_end').value   = `${pad2(g.endHour)}:${pad2(g.endMinute)}`;
+  $('se_rateKw').value = ((g.fdPwr || 0) / 1000).toFixed(1);
+  $('se_fdSoc').value  = g.fdSoc ?? 20;
+  $('se_minSocOnGrid').value = g.minSocOnGrid ?? 10;
+  $('se_maxSoc').value = g.maxSoc ?? 100;
+  $('savedEditErr').textContent = '';
+  $('savedEditBackdrop').classList.add('show');
+}
+
+// Delete a live slot from the inverter (Delete button on a scheduler row).
+async function deleteLiveSlot(idx) {
+  if (!adminPw) { openUnlockPrompt(); return; }
+  const { groups } = await readScheduler();
+  const target = _currentSchedGroups[idx];
+  if (!target) return;
+  // Match by content (workMode + window) so a re-fetched array still works.
+  const next = groups.filter((g) => !(
+    g.workMode === target.workMode
+    && g.startHour === target.startHour && g.startMinute === target.startMinute
+    && g.endHour   === target.endHour   && g.endMinute   === target.endMinute
+  ));
+  if (next.length === groups.length) { log('Slot already gone.', 'err'); return; }
+  log(`Deleting slot ${idx} (${target.workMode} ${pad2(target.startHour)}:${pad2(target.startMinute)}–${pad2(target.endHour)}:${pad2(target.endMinute)})…`);
+  const r = await writeScheduler(next);
+  if (r.errno === 0) { log('Slot deleted ✓', 'ok'); setTimeout(refreshSchedulerPanel, 1000); }
+  else log('Delete failed: ' + (r.msg || JSON.stringify(r)), 'err');
+}
+
+function readEditorFields() {
   const [sh, sm] = ($('se_start').value || '0:0').split(':').map(Number);
   const [eh, em] = ($('se_end').value   || '0:0').split(':').map(Number);
-  const preset = {
-    id: id || ('preset-' + Date.now()),
-    label: $('se_label').value.trim() || '(unnamed)',
+  return {
     workMode: $('se_workMode').value,
     startHour: sh|0, startMinute: sm|0,
     endHour: eh|0, endMinute: em|0,
@@ -1986,15 +2037,64 @@ async function saveSavedEditModal() {
     fdSoc: Number($('se_fdSoc').value),
     minSocOnGrid: Number($('se_minSocOnGrid').value),
     maxSoc: Number($('se_maxSoc').value),
-    enabled: true,
   };
-  // Validation
-  if (preset.startHour === preset.endHour && preset.startMinute === preset.endMinute) {
+}
+
+async function saveSavedEditModal() {
+  const fields = readEditorFields();
+  if (fields.startHour === fields.endHour && fields.startMinute === fields.endMinute) {
     $('savedEditErr').textContent = 'Start and end can\'t be identical.'; return;
   }
-  if (preset.fdPwr < 0 || preset.fdPwr > 20000) {
+  if (fields.fdPwr < 0 || fields.fdPwr > 20000) {
     $('savedEditErr').textContent = 'Rate out of range.'; return;
   }
+
+  // ----- LIVE SLOT MODE: write changes directly to the inverter -----
+  if (_editorMode === 'liveSlot') {
+    const idx = _editorLiveIdx;
+    const original = _currentSchedGroups[idx];
+    if (!original) return;
+    const { groups } = await readScheduler();
+    // Remove the original slot (match by content)
+    const next = groups.filter((g) => !(
+      g.workMode === original.workMode
+      && g.startHour === original.startHour && g.startMinute === original.startMinute
+      && g.endHour   === original.endHour   && g.endMinute   === original.endMinute
+    ));
+    // Add the edited slot
+    next.push({ enable: 1, ...fields });
+    log(`Updating slot ${idx} on inverter…`);
+    const r = await writeScheduler(next);
+    if (r.errno !== 0) {
+      $('savedEditErr').textContent = 'Write failed: ' + (r.msg || JSON.stringify(r));
+      return;
+    }
+    log('Slot updated ✓', 'ok');
+    // Optionally also save as preset
+    if ($('se_asPreset').checked) {
+      const label = prompt('Label for this saved preset?', '') || '(unnamed)';
+      savedPresets.push({
+        id: 'preset-' + Date.now(),
+        label,
+        ...fields,
+        enabled: true,
+      });
+      if (await persistSavedPresets()) renderSavedPresets();
+    }
+    closeSavedEditModal();
+    setTimeout(refreshSchedulerPanel, 1000);
+    return;
+  }
+
+  // ----- PRESET MODE: save to config.schedulerPresets -----
+  const id = _savedEditingId;
+  const isNew = !savedPresets.find((x) => x.id === id);
+  const preset = {
+    id: id || ('preset-' + Date.now()),
+    label: $('se_label').value.trim() || '(unnamed)',
+    ...fields,
+    enabled: true,
+  };
   if (isNew) {
     savedPresets.push(preset);
   } else {
@@ -2010,6 +2110,14 @@ async function saveSavedEditModal() {
 }
 
 async function deleteSavedEditModal() {
+  // ----- LIVE SLOT MODE: delete from inverter -----
+  if (_editorMode === 'liveSlot') {
+    const idx = _editorLiveIdx;
+    closeSavedEditModal();
+    await deleteLiveSlot(idx).catch((e) => log('delete: ' + e.message, 'err'));
+    return;
+  }
+  // ----- PRESET MODE: remove from saved presets -----
   const id = _savedEditingId;
   if (!id) return;
   savedPresets = savedPresets.filter((x) => x.id !== id);
