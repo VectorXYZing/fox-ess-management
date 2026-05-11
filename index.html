@@ -1016,17 +1016,6 @@ async function loadToday() {
       Math.max(0, (chg[i] || 0) - (grid[i] || 0))
     );
     log('solar: using derived formula (gen − dis + max(0, chg − grid)).', 'ok');
-    // Debug: log raw hourly arrays so we can verify Fox variable meanings.
-    // Open DevTools → Console and look for "solar-debug".
-    console.log('=== solar-debug ===');
-    console.table(Array.from({ length: len }, (_, i) => ({
-      hour     : `${String(i).padStart(2,'0')}:00`,
-      gen      : +(gen[i]  || 0).toFixed(2),
-      discharge: +(dis[i]  || 0).toFixed(2),
-      charge   : +(chg[i]  || 0).toFixed(2),
-      grid     : +(grid[i] || 0).toFixed(2),
-      derivedPV: +todayHourlyGen[i].toFixed(2),
-    })));
   }
   // Also update today totals tiles to use the derived PV total (more accurate)
   const derivedPvToday = todayHourlyGen.reduce((a, b) => a + b, 0);
