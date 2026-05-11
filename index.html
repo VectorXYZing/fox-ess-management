@@ -1686,41 +1686,77 @@ async function refreshSchedulerPanel() {
     } else {
       $('schedActive').textContent = 'none — running default Self-use';
     }
-    // Cache current groups so live-slot edit/delete can reference them by index
+    // Build a unified view: live inverter slots + saved presets that aren't
+    // currently on the inverter. This way disabled slots stay visible so the
+    // user can toggle them back on without hunting them down.
+    const isSamePreset = (a, b) => a.workMode === b.workMode
+      && a.startHour === b.startHour && a.startMinute === b.startMinute
+      && a.endHour   === b.endHour   && a.endMinute   === b.endMinute;
+    const liveRows = s.groups.map((g, idx) => ({ kind: 'live', idx, g }));
+    const presetOnlyRows = savedPresets
+      .filter((p) => !s.groups.some((g) => isSamePreset(g, p)))
+      .map((p) => ({ kind: 'preset', preset: p, g: p }));
+    const allRows = [...liveRows, ...presetOnlyRows];
     _currentSchedGroups = s.groups;
-    let html = '<thead><tr><th>#</th><th>Mode</th><th>Window</th><th>Rate</th><th>Cut-off</th><th>Max</th><th style="width:120px;text-align:right">Actions</th></tr></thead><tbody>';
-    s.groups.forEach((g, i) => {
-      const active = groupMatchesNow(g, nowM);
-      const cls = active ? 'active' : (g.enable ? 'on' : '');
+
+    let html = '<thead><tr><th style="width:48px">On</th><th>Mode</th><th>Window</th><th>Rate</th><th>Cut-off</th><th>Max</th><th style="width:140px;text-align:right">Actions</th></tr></thead><tbody>';
+    allRows.forEach((row, rowIdx) => {
+      const g = row.g;
+      const isLive = row.kind === 'live';
+      const active = isLive && groupMatchesNow(g, nowM);
+      const cls = active ? 'active' : (isLive ? 'on' : '');
       const win = g.isRemainMode
         ? '00:00–23:59 (default)'
         : `${pad2(g.startHour)}:${pad2(g.startMinute)}–${pad2(g.endHour)}:${pad2(g.endMinute)}`;
-      // isRemainMode is the v3 catch-all and can't be edited/deleted directly.
-      const action = g.isRemainMode
-        ? '<span class="hint" style="font-size:11px">auto</span>'
-        : `<button class="sched-edit-row" data-idx="${i}" title="Edit slot">✎ Edit</button>
-           <button class="sched-del-row"  data-idx="${i}" title="Delete slot from inverter" style="margin-left:4px;color:var(--red)">🗑</button>`;
-      html += `<tr class="${cls}"><td>${i}</td><td>${g.workMode}</td><td>${win}</td><td>${(g.fdPwr/1000).toFixed(1)}kW</td><td>${g.fdSoc}%</td><td>${g.maxSoc ?? '—'}%</td><td style="text-align:right">${action}</td></tr>`;
+      // isRemainMode is the v3 catch-all — auto-managed.
+      let toggle, action;
+      if (g.isRemainMode) {
+        toggle = '<span class="hint" style="font-size:11px">—</span>';
+        action = '<span class="hint" style="font-size:11px">auto</span>';
+      } else {
+        toggle = `<input type="checkbox" class="sched-toggle" data-row="${rowIdx}" ${isLive ? 'checked' : ''} title="${isLive ? 'On inverter (uncheck to disable)' : 'Saved preset, not on inverter (check to enable)'}" />`;
+        action = isLive
+          ? `<button class="sched-edit-row" data-row="${rowIdx}" title="Edit slot">✎ Edit</button>
+             <button class="sched-del-row"  data-row="${rowIdx}" title="Delete slot" style="margin-left:4px;color:var(--red)">🗑</button>`
+          : `<span class="hint" style="font-size:11px;margin-right:6px" title="${escapeHtml(row.preset?.label || '')}">${escapeHtml(row.preset?.label || 'saved')}</span><button class="sched-edit-row" data-row="${rowIdx}" title="Edit preset">✎</button>`;
+      }
+      const fdPwrKw = ((g.fdPwr || 0) / 1000).toFixed(1);
+      html += `<tr class="${cls}"${isLive ? '' : ' style="opacity:.6"'}><td>${toggle}</td><td>${g.workMode}</td><td>${win}</td><td>${fdPwrKw}kW</td><td>${g.fdSoc}%</td><td>${g.maxSoc ?? '—'}%</td><td style="text-align:right">${action}</td></tr>`;
     });
     html += '</tbody>';
     $('schedTable').innerHTML = html;
-    // Wire up Edit + Delete buttons
+
+    // Wire toggle / edit / delete
+    $('schedTable').querySelectorAll('.sched-toggle').forEach((cb) => {
+      cb.addEventListener('change', async (e) => {
+        if (!adminPw) { e.target.checked = !e.target.checked; openUnlockPrompt(); return; }
+        const rowIdx = Number(e.target.dataset.row);
+        const row = allRows[rowIdx];
+        await toggleSchedulerRow(row, e.target.checked).catch((err) => {
+          log('toggle: ' + err.message, 'err');
+          e.target.checked = !e.target.checked;
+        });
+      });
+    });
     $('schedTable').querySelectorAll('.sched-edit-row').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         if (!adminPw) { openUnlockPrompt(); return; }
-        const idx = Number(e.target.dataset.idx);
-        openLiveSlotEditor(idx);
+        const rowIdx = Number(e.target.dataset.row);
+        const row = allRows[rowIdx];
+        if (row.kind === 'live') openLiveSlotEditor(row.idx);
+        else openSavedEditModal(row.preset.id);
       });
     });
     $('schedTable').querySelectorAll('.sched-del-row').forEach((btn) => {
       btn.addEventListener('click', async (e) => {
         if (!adminPw) { openUnlockPrompt(); return; }
-        const idx = Number(e.target.dataset.idx);
-        const g = _currentSchedGroups[idx];
-        if (!g) return;
+        const rowIdx = Number(e.target.dataset.row);
+        const row = allRows[rowIdx];
+        if (row.kind !== 'live') return;
+        const g = row.g;
         const win = `${pad2(g.startHour)}:${pad2(g.startMinute)}–${pad2(g.endHour)}:${pad2(g.endMinute)}`;
-        if (!confirm(`Delete ${g.workMode} ${win} from inverter?`)) return;
-        await deleteLiveSlot(idx).catch((err) => log('delete: ' + err.message, 'err'));
+        if (!confirm(`Delete ${g.workMode} ${win} from inverter?\n\n(If you might want it back later, toggle it Off instead — it'll be saved as a preset.)`)) return;
+        await deleteLiveSlot(row.idx).catch((err) => log('delete: ' + err.message, 'err'));
       });
     });
   } catch (e) { log('scheduler refresh failed: ' + e.message, 'err'); }
@@ -2005,6 +2041,72 @@ function openLiveSlotEditor(idx) {
   $('se_maxSoc').value = g.maxSoc ?? 100;
   $('savedEditErr').textContent = '';
   $('savedEditBackdrop').classList.add('show');
+}
+
+// Toggle a scheduler row on/off. "on" = present on inverter.
+// Off: save as preset (if not already) then remove from inverter.
+// On: add the preset's slot to inverter (only valid for preset-only rows).
+async function toggleSchedulerRow(row, makeOn) {
+  if (row.g.isRemainMode) return; // can't toggle the auto default
+
+  if (makeOn) {
+    // Re-enable a preset-only row → write to inverter
+    if (row.kind !== 'preset') return;
+    const p = row.preset;
+    const { groups } = await readScheduler();
+    const next = [...groups, {
+      enable: 1,
+      startHour: p.startHour, startMinute: p.startMinute,
+      endHour: p.endHour, endMinute: p.endMinute,
+      workMode: p.workMode,
+      fdSoc: p.fdSoc, fdPwr: p.fdPwr,
+      minSocOnGrid: p.minSocOnGrid, maxSoc: p.maxSoc,
+    }];
+    log(`Enabling "${p.label}" → writing to inverter…`);
+    const r = await writeScheduler(next);
+    if (r.errno !== 0) throw new Error(r.msg || JSON.stringify(r));
+    // Also mark the preset enabled in saved state for consistency
+    p.enabled = true;
+    await persistSavedPresets();
+    log('Enabled ✓', 'ok');
+    setTimeout(() => { refreshSchedulerPanel().catch(() => {}); renderSavedPresets(); }, 800);
+    return;
+  }
+
+  // Disable: live → remove from inverter, auto-save as preset if not saved
+  if (row.kind !== 'live') return;
+  const g = row.g;
+  const matching = savedPresets.find((p) =>
+    p.workMode === g.workMode
+    && p.startHour === g.startHour && p.startMinute === g.startMinute
+    && p.endHour   === g.endHour   && p.endMinute   === g.endMinute);
+  if (!matching) {
+    // Auto-save first so it can be re-enabled later
+    const label = `${g.workMode} ${pad2(g.startHour)}:${pad2(g.startMinute)}–${pad2(g.endHour)}:${pad2(g.endMinute)}`;
+    savedPresets.push({
+      id: 'preset-' + Date.now(),
+      label,
+      workMode: g.workMode,
+      startHour: g.startHour, startMinute: g.startMinute,
+      endHour: g.endHour, endMinute: g.endMinute,
+      fdPwr: g.fdPwr, fdSoc: g.fdSoc,
+      minSocOnGrid: g.minSocOnGrid || 10,
+      maxSoc: g.maxSoc || 100,
+      enabled: false,
+    });
+    if (!(await persistSavedPresets())) throw new Error('save preset failed');
+    log(`Auto-saved as preset "${label}" before disabling.`);
+  } else {
+    matching.enabled = false;
+    await persistSavedPresets();
+  }
+  // Now remove from inverter (find original index via _currentSchedGroups)
+  const liveIdx = _currentSchedGroups.findIndex((x) =>
+    x.workMode === g.workMode
+    && x.startHour === g.startHour && x.startMinute === g.startMinute
+    && x.endHour   === g.endHour   && x.endMinute   === g.endMinute);
+  if (liveIdx >= 0) await deleteLiveSlot(liveIdx);
+  setTimeout(renderSavedPresets, 800);
 }
 
 // Delete a live slot from the inverter (Delete button on a scheduler row).
@@ -2581,8 +2683,10 @@ $('recRefresh').addEventListener('click', () => loadRecommendation().catch((e) =
   // Initial fetches — same as clicking Refresh, so opening the page always
   // shows fresh numbers without the user having to press the button.
   refreshAll().catch(() => {});
-  refreshSchedulerPanel().catch(() => {});
-  loadSavedPresets().catch(() => {});
+  // Load saved presets first so the scheduler panel can merge them in.
+  loadSavedPresets().then(() => refreshSchedulerPanel().catch(() => {})).catch(() => {
+    refreshSchedulerPanel().catch(() => {});
+  });
 
   // ---------- End-of-day SoC ----------
   async function loadSocHistory() {
