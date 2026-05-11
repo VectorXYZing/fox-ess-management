@@ -652,7 +652,7 @@
         <h2 style="margin:0">Today's Plan</h2>
         <div class="row" style="gap:10px;align-items:center">
           <span class="kv" style="flex-direction:row;gap:6px;align-items:baseline">
-            <span class="k">Updated</span><span class="v small" id="recComputedAt">—</span>
+            <span class="k">Updated</span><span class="v small" id="recComputedAt">—</span><span id="recStale" style="display:none;font-size:0.75em;color:var(--amber);margin-left:4px" title="Recommendation engine may have stalled — data is older than expected">stale</span>
           </span>
           <button id="recRefresh">Refresh</button>
         </div>
@@ -2598,7 +2598,12 @@ async function loadRecommendation() {
   }
 
   const inp = r.inputs || {}, c = r.computed || {};
-  setKV('recComputedAt', r.computedAt ? new Date(r.computedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—');
+  const computedAtEl = $('recComputedAt');
+  if (computedAtEl) {
+    computedAtEl.textContent = r.computedAt ? new Date(r.computedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—';
+    const staleEl = $('recStale');
+    if (staleEl) { staleEl.style.display = r.isStale ? 'inline' : 'none'; }
+  }
 
   // Headline + sub come pre-formatted from the backend.
   head.textContent = r.headline || '—';
@@ -2910,6 +2915,8 @@ $('recRefresh').addEventListener('click', () => loadRecommendation().catch((e) =
   async function saveSettings() {
     errEl.textContent = '';
     okEl.textContent = '';
+    const saveBtn = $('settingsSave');
+    saveBtn.disabled = true;
     const payload = {
       foxApiKey: $('s_foxApiKey').value.trim(),
       deviceSN: $('s_deviceSN').value.trim(),
@@ -2946,15 +2953,19 @@ $('recRefresh').addEventListener('click', () => loadRecommendation().catch((e) =
         },
       },
     };
-    const r = await fetch('/api/settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Admin-Password': adminPw },
-      body: JSON.stringify(payload),
-    });
-    if (r.status === 401) { errEl.textContent = 'Bad admin password. Please re-enter.'; sessionStorage.removeItem('adminPw'); adminPw = ''; showAuth(); return; }
-    if (!r.ok) { errEl.textContent = 'Save failed: ' + r.status; return; }
-    okEl.textContent = 'Saved. Reloading…';
-    setTimeout(() => location.reload(), 600);
+    try {
+      const r = await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Admin-Password': adminPw },
+        body: JSON.stringify(payload),
+      });
+      if (r.status === 401) { errEl.textContent = 'Bad admin password. Please re-enter.'; sessionStorage.removeItem('adminPw'); adminPw = ''; showAuth(); return; }
+      if (!r.ok) { errEl.textContent = 'Save failed: ' + r.status; return; }
+      okEl.textContent = 'Saved. Reloading…';
+      setTimeout(() => location.reload(), 600);
+    } finally {
+      saveBtn.disabled = false;
+    }
   }
 
   $('settingsBtn').addEventListener('click', () => openSettings(true));

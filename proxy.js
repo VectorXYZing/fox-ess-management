@@ -23,6 +23,13 @@ const { httpsGetJson }        = require('./lib/utils');
 const { notifyAction }        = require('./lib/notifications');
 
 // ---------------------------------------------------------------------------
+// Audit log
+// ---------------------------------------------------------------------------
+function auditLog(action, detail) {
+  console.log(`[audit] ${new Date().toISOString()} ${action} — ${detail}`);
+}
+
+// ---------------------------------------------------------------------------
 // Background tickers
 // ---------------------------------------------------------------------------
 // Kick off after the server finishes starting to avoid racing config load.
@@ -32,11 +39,21 @@ setInterval(rec.tick, rec.TICK_MS);
 // ---------------------------------------------------------------------------
 // HTTP helpers
 // ---------------------------------------------------------------------------
+const MAX_BODY_BYTES = 1_048_576; // 1 MB
+
 function readBody(req) {
-  return new Promise((resolve) => {
-    let data = '';
-    req.on('data', (c) => (data += c));
-    req.on('end',  ()  => resolve(data));
+  return new Promise((resolve, reject) => {
+    let data = '', bytes = 0;
+    req.on('data', (c) => {
+      bytes += Buffer.byteLength(c);
+      if (bytes > MAX_BODY_BYTES) {
+        req.destroy();
+        return reject(Object.assign(new Error('Request body too large'), { status: 413 }));
+      }
+      data += c;
+    });
+    req.on('end', () => resolve(data));
+    req.on('error', reject);
   });
 }
 
@@ -105,7 +122,7 @@ const server = http.createServer(async (req, res) => {
       const { body: out, isWrite } = await foxClient.proxyFoxRequest(foxPath, body);
 
       if (isWrite) {
-        try { notifyAction(foxPath, body, JSON.parse(out)); } catch {}
+        try { notifyAction(foxPath, body, JSON.parse(out)); } catch (e) { console.warn('notify failed:', e.message); }
       }
       return send(res, 200, out);
     }
@@ -148,6 +165,8 @@ const server = http.createServer(async (req, res) => {
       }
       try   { saveConfig(incoming); }
       catch (e) { return send(res, 500, JSON.stringify({ error: 'failed to save: ' + e.message })); }
+      const ip = req.socket?.remoteAddress || 'unknown';
+      auditLog('settings:save', `deviceSN=${incoming.deviceSN} from ${ip}`);
       return send(res, 200, JSON.stringify({ ok: true, configured: isConfigured() }));
     }
 
@@ -178,6 +197,8 @@ const server = http.createServer(async (req, res) => {
       }
       try { saveConfig({ schedulerPresets: incoming.presets }); }
       catch (e) { return send(res, 500, JSON.stringify({ error: 'save failed: ' + e.message })); }
+      const ip = req.socket?.remoteAddress || 'unknown';
+      auditLog('saved-schedules:save', `count=${incoming.presets.length} from ${ip}`);
       return send(res, 200, JSON.stringify({ ok: true, presets: config.schedulerPresets }));
     }
 
@@ -279,6 +300,11 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    // --- Health check -------------------------------------------------------
+    if (req.url === '/healthz' || req.url === '/health') {
+      return send(res, 200, JSON.stringify({ ok: true, uptime: Math.floor(process.uptime()), configured: isConfigured() }));
+    }
+
     // --- Static: dashboard --------------------------------------------------
     if (req.url === '/' || req.url === '/index.html') {
       return serveStatic(path.join(__dirname, 'index.html'), res);
@@ -287,6 +313,7 @@ const server = http.createServer(async (req, res) => {
     send(res, 404, 'Not found', 'text/plain');
 
   } catch (err) {
+    if (err.status === 413) return send(res, 413, JSON.stringify({ error: err.message }));
     console.error(err);
     send(res, 500, JSON.stringify({ error: err.message }));
   }
@@ -309,3 +336,18 @@ server.listen(PORT, () => {
   }
   socHistory.scheduleNextLockin();
 });
+
+// ---------------------------------------------------------------------------
+// Graceful shutdown
+// ---------------------------------------------------------------------------
+function shutdown(signal) {
+  console.log(`\n[${signal}] Shutting down gracefully…`);
+  server.close(() => {
+    console.log('Server closed.');
+    process.exit(0);
+  });
+  // Force-exit after 5 s if connections are still open.
+  setTimeout(() => process.exit(1), 5000).unref();
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT',  () => shutdown('SIGINT'));

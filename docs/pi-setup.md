@@ -62,14 +62,17 @@ The dashboard will be available at **http://raspberrypi.local:8080** (or whateve
 ## Step 4 — Verify it's running
 
 ```bash
-docker ps                          # should show fox-ess running
+docker ps                          # should show fox-ess with status (healthy)
 docker logs fox-ess                # check for errors
+curl -s http://localhost:8080/healthz  # should return {"ok":true,"uptime":...}
 ```
 
 Open a browser on any device on your LAN:
 ```
 http://raspberrypi.local:8080
 ```
+
+> The container takes up to 10 seconds to report `(healthy)` — this is normal. It polls `/healthz` every 30 seconds thereafter.
 
 ---
 
@@ -117,22 +120,43 @@ For extra protection, enable **Cloudflare Access** in front and require email OT
 | Task | Command |
 |------|---------|
 | View logs | `docker logs -f fox-ess` |
+| Check health | `docker ps` (look for `(healthy)` in the STATUS column) |
 | Stop | `docker compose down` |
-| Restart | `docker compose restart` |
-| Update to latest | `docker compose pull && docker compose up -d` |
 | Change password | Edit `.env`, then `docker compose up -d` |
 
 The container is set to `restart: unless-stopped` so it comes back automatically after a reboot or crash.
+
+> **`docker compose restart` does NOT update the running code.** For the pre-built image, use `docker compose pull && docker compose up -d`. For a local build, use `docker compose up -d --build`. A plain `restart` just cycles the container with the same image.
 
 ---
 
 ## Keeping it up to date
 
+### Using the pre-built image (default)
+
+If `docker-compose.yml` has `image: ghcr.io/vectorxyzing/fox-ess-management:latest` (the default), update by pulling the latest image:
+
 ```bash
 cd ~/fox-ess-management
-git pull
-docker compose pull
-docker compose up -d
+git pull                          # get the latest docker-compose.yml / .env.example
+docker compose pull               # download the latest image
+docker compose up -d              # recreate the container
 ```
 
-This pulls the latest pre-built image from GitHub Container Registry — no rebuild needed.
+Your `config.json`, `data/`, and `state/` are bind-mounted and survive the update unchanged.
+
+### Using a local build
+
+If you have switched to `build: .` in `docker-compose.yml` (e.g. you are running custom local changes), you must rebuild the image after any source change — a plain `up -d` or `restart` will silently keep running the old code because `index.html`, `proxy.js`, and `lib/` are baked into the image at build time:
+
+```bash
+cd ~/fox-ess-management
+git pull                          # or edit your local files
+docker compose up -d --build      # rebuild image, then recreate container
+```
+
+To verify the new code is actually running:
+```bash
+docker logs fox-ess | head -5     # check the startup timestamp
+curl -s http://localhost:8080/healthz   # should return {"ok":true,...}
+```

@@ -144,11 +144,13 @@ If something else on the Pi is already using port 8080 (PiAware's lighttpd commo
 - The admin password gates writes and settings, not reads. If you don't want the dashboard itself public, put it behind Cloudflare Access, Tailscale auth, or just don't enable Funnel.
 - `.env` and `config.json` are in `.gitignore`. Don't commit them.
 - API keys are stored in `config.json`. Anyone with shell access to the host or the admin password can read them.
+- All admin writes (settings save, saved-schedules save) are written to the server log as audit entries: `[audit] <timestamp> <action> — <detail>`. No passwords are logged.
+- POST request bodies are capped at 1 MB — oversized requests are rejected with HTTP 413.
 
 ## Project layout
 
 ```
-proxy.js              HTTP server — routes only, ~150 lines
+proxy.js              HTTP server — routes, request validation, audit logging, graceful shutdown
 index.html            Complete single-page dashboard (vanilla JS, no build step)
 config.json           Runtime config (created from config.example.json on first start)
 config.example.json   Template config, safe to commit
@@ -182,8 +184,9 @@ state/
 | Method | Path | Notes |
 |--------|------|-------|
 | `GET`  | `/` | Dashboard |
+| `GET`  | `/healthz` | Health check — returns `{ ok, uptime, configured }`. Used by Docker and load-balancers. |
 | `GET`  | `/api/config` | Non-secret config summary (aemoRegion, pollSeconds, battery, solar.systemKw, etc.) |
-| `POST` | `/api/fox/<foxPath>` | Authenticated proxy to Fox ESS Cloud API with per-endpoint caching and a 2 s serial throttle. **Writes require admin password.** |
+| `POST` | `/api/fox/<foxPath>` | Authenticated proxy to Fox ESS Cloud API with per-endpoint caching and a 2 s serial throttle. **Writes require admin password.** Request body capped at 1 MB. |
 | `GET`  | `/api/aemo/current` | AEMO 5-min live summary (all regions) |
 | `GET`  | `/api/aemo/history` | ~14 h of 30-min-spaced dispatch prices for the configured region |
 | `GET`  | `/api/aemo/forecast` | ~20 h AEMO predispatch price forecast for the configured region |
@@ -192,9 +195,11 @@ state/
 | `GET`  | `/api/soc-history?days=N` | Daily minimum SoC for the last N days |
 | `POST` | `/api/soc-history/snapshot` | Manually trigger today's min-SoC lock-in. **Admin only.** |
 | `GET`  | `/api/report/week?days=N` | Last N days of daily energy totals |
-| `GET`  | `/api/recommendation` | Current midday top-up recommendation |
+| `GET`  | `/api/recommendation` | Current midday top-up recommendation. Includes `isStale: true` if the last compute was more than one tick interval ago (e.g. background tick failure). |
 | `GET`  | `/api/settings` | Full config (API key masked). **Admin only.** |
-| `POST` | `/api/settings` | Save full config. **Admin only.** |
+| `POST` | `/api/settings` | Save full config. **Admin only.** Writes an audit log entry. |
+| `GET`  | `/api/saved-schedules` | Saved scheduler presets. **Admin only.** |
+| `POST` | `/api/saved-schedules` | Save scheduler presets. **Admin only.** Writes an audit log entry. |
 | `POST` | `/api/settings/verify` | Check admin password (rate-limited per IP) |
 | `POST` | `/api/notify/test` | Send a test ntfy notification. **Admin only.** |
 
@@ -212,6 +217,12 @@ serialised through a promise-chain throttle that enforces a minimum 2-second gap
 between consecutive upstream calls. Read endpoints are also cached
 (25 s – 5 min depending on the endpoint) so multiple browser tabs share a single
 upstream fetch.
+
+### Graceful shutdown
+The server listens for `SIGTERM` and `SIGINT`. On receiving either signal it stops accepting new connections, waits for in-flight requests to drain, then exits cleanly. Docker Compose sends `SIGTERM` on `docker compose stop` / `down`, so the container exits without force-killing. A 5-second hard-exit timer is the safety net for stuck connections.
+
+### Health check
+`GET /healthz` returns `{ ok: true, uptime: <seconds>, configured: <bool> }` with HTTP 200. This endpoint is used by the `HEALTHCHECK` instruction in the Dockerfile and the `healthcheck` block in `docker-compose.yml`. `docker ps` shows `(healthy)` once the server is up and configured.
 
 ### Cache invalidation
 Each `lib/` module registers a `clearCache()` callback with `config.js` via
