@@ -1026,7 +1026,7 @@ async function loadToday() {
       charge   : +(chg[i]  || 0).toFixed(2),
       grid     : +(grid[i] || 0).toFixed(2),
       derivedPV: +todayHourlyGen[i].toFixed(2),
-    }));
+    })));
   }
   // Also update today totals tiles to use the derived PV total (more accurate)
   const derivedPvToday = todayHourlyGen.reduce((a, b) => a + b, 0);
