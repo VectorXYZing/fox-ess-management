@@ -2154,9 +2154,10 @@ $('recRefresh').addEventListener('click', () => loadRecommendation().catch((e) =
     applyLiveState(next);
   });
 
-  // Initial fetches (non-live always-on data)
-  Promise.all([loadToday(), loadPrices(), loadSolar(), refreshSchedulerPanel(), loadRecommendation(), loadWeek()]).catch(() => {});
-  if (savedLive) loadLive().catch(() => {});
+  // Initial fetches — same as clicking Refresh, so opening the page always
+  // shows fresh numbers without the user having to press the button.
+  refreshAll().catch(() => {});
+  refreshSchedulerPanel().catch(() => {});
 
   // ---------- End-of-day SoC ----------
   async function loadSocHistory() {
