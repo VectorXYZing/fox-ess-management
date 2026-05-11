@@ -481,6 +481,46 @@
     </div>
   </div>
 
+  <div class="modal-backdrop" id="savedEditBackdrop" role="dialog" aria-modal="true">
+    <div class="modal" style="max-width:480px">
+      <h2 id="savedEditTitle">Edit saved schedule</h2>
+      <div class="sub">Define a regular slot to keep on the inverter.</div>
+      <label class="full">Label
+        <input type="text" id="se_label" placeholder="e.g. Evening peak dump" />
+      </label>
+      <label class="full">Mode
+        <select id="se_workMode">
+          <option value="ForceDischarge">ForceDischarge (export to grid)</option>
+          <option value="ForceCharge(BAT)">ForceCharge (charge from grid)</option>
+          <option value="SelfUse">SelfUse</option>
+          <option value="Feedin">Feedin</option>
+          <option value="Backup">Backup</option>
+        </select>
+      </label>
+      <div class="row" style="gap:10px">
+        <label style="flex:1">Start <input type="time" id="se_start" /></label>
+        <label style="flex:1">End <input type="time" id="se_end" /></label>
+      </div>
+      <div class="row" style="gap:10px">
+        <label style="flex:1">Rate (kW) <input type="number" id="se_rateKw" min="0" max="20" step="0.1" /></label>
+        <label style="flex:1">fdSoC (%) <input type="number" id="se_fdSoc" min="10" max="100" step="1" /></label>
+      </div>
+      <div class="row" style="gap:10px">
+        <label style="flex:1">Min SoC on grid (%) <input type="number" id="se_minSocOnGrid" min="10" max="100" step="1" /></label>
+        <label style="flex:1">Max SoC (%) <input type="number" id="se_maxSoc" min="10" max="100" step="1" /></label>
+      </div>
+      <div class="hint" style="margin-top:6px">
+        <b>fdSoC</b> = target SoC. For ForceDischarge it's the floor (stop discharging at this %). For ForceCharge it's the ceiling (charge up to this %).
+      </div>
+      <div class="err" id="savedEditErr"></div>
+      <div class="actions">
+        <button id="savedEditDelete" style="margin-right:auto;color:var(--red)">Delete</button>
+        <button id="savedEditCancel">Cancel</button>
+        <button class="primary" id="savedEditSave">Save</button>
+      </div>
+    </div>
+  </div>
+
   <div class="grid">
 
     <section class="panel">
@@ -714,6 +754,18 @@
     </div>
     <table class="sched-table" id="schedTable"></table>
     <div class="hint" style="margin-top:8px">Use <b>Stop / Clear schedule</b> above to clear all forced charge/discharge slots and return the battery to Self-use.</div>
+
+    <div class="saved-sched">
+      <div class="row" style="justify-content:space-between;align-items:baseline;margin:18px 0 8px;flex-wrap:wrap;gap:8px">
+        <h2 style="margin:0">Saved Schedules</h2>
+        <div class="row" style="gap:8px">
+          <button id="savedAddBtn">+ Add</button>
+          <button class="primary" id="savedApplyBtn">⏏ Sync to inverter</button>
+        </div>
+      </div>
+      <div class="hint" style="margin-bottom:8px">Regular slots you want to keep on the inverter (e.g. peak evening dump). Toggle to enable/disable. Click <b>Sync to inverter</b> to apply enabled slots to the Fox scheduler — other manual slots are preserved.</div>
+      <table class="sched-table" id="savedTable"></table>
+    </div>
   </section>
 
   <section class="panel" style="margin-top:16px">
@@ -1594,6 +1646,17 @@ function isAnyForcedMode(g) {
   return isAnyForceCharge(g) || isAnyForceDischarge(g);
 }
 
+// Is a forced slot CURRENTLY ACTIVE? (overlapping with the moment we call this)
+// Used by stopForce / forceChargeNow / forceDumpNow so we only clear "now"
+// slots and never destroy the user's future-scheduled regulars (e.g. the
+// 17:30-19:30 evening dump).
+function isForcedActiveNow(g) {
+  if (!isAnyForcedMode(g)) return false;
+  const now = new Date();
+  const nowM = now.getHours() * 60 + now.getMinutes();
+  return groupMatchesNow(g, nowM);
+}
+
 // Check whether a group's time window contains the given minutes-since-midnight value.
 // isRemainMode groups (00:00-23:59 default) are never treated as an explicit override.
 function groupMatchesNow(g, nowM) {
@@ -1643,10 +1706,11 @@ async function forceChargeNow() {
 
   const { maxGroupCount, groups } = await readScheduler();
 
-  // Remove any stale forced slots first.
-  let filtered = groups.filter((g) => !isAnyForcedMode(g));
+  // Only clear forced slots that are ACTIVE RIGHT NOW. Preserves the user's
+  // future-scheduled slots (e.g. evening peak dump).
+  let filtered = groups.filter((g) => !isForcedActiveNow(g));
   const cleared = groups.length - filtered.length;
-  if (cleared > 0) log(`Cleared ${cleared} stale forced slot(s).`);
+  if (cleared > 0) log(`Cleared ${cleared} currently-active forced slot(s).`);
 
   // Check capacity (exclude the isRemainMode default which doesn't count as a user slot).
   const userSlots = filtered.filter((g) => !g.isRemainMode).length;
@@ -1688,13 +1752,14 @@ async function forceChargeNow() {
 
 async function stopForce() {
   cancelAutoStop();
-  // Remove any forced-mode slots; leave every other slot (including isRemainMode) as-is.
+  // Only remove forced slots that are running RIGHT NOW. Future-scheduled
+  // forced slots (regular evening dump etc.) are left alone.
   const { groups } = await readScheduler();
-  const filtered = groups.filter((g) => !isAnyForcedMode(g));
+  const filtered = groups.filter((g) => !isForcedActiveNow(g));
   const cleared = groups.length - filtered.length;
-  if (cleared === 0) { log('No active forced slot to clear.', 'ok'); return; }
+  if (cleared === 0) { log('No currently-active forced slot to clear.', 'ok'); return; }
   const r = await writeScheduler(filtered);
-  if (r.errno === 0) log(`Cleared ${cleared} forced slot(s); other slots untouched ✓`, 'ok');
+  if (r.errno === 0) log(`Cleared ${cleared} active forced slot(s); scheduled slots preserved ✓`, 'ok');
   else log('stop failed: ' + (r.msg || JSON.stringify(r)), 'err');
 }
 
@@ -1708,10 +1773,11 @@ async function forceDumpNow() {
 
   const { maxGroupCount, groups } = await readScheduler();
 
-  // Remove stale forced slots first.
-  let filtered = groups.filter((g) => !isAnyForcedMode(g));
+  // Only clear forced slots that are ACTIVE RIGHT NOW. Preserves future
+  // scheduled slots like the evening dump.
+  let filtered = groups.filter((g) => !isForcedActiveNow(g));
   const cleared = groups.length - filtered.length;
-  if (cleared > 0) log(`Cleared ${cleared} stale forced slot(s).`);
+  if (cleared > 0) log(`Cleared ${cleared} currently-active forced slot(s).`);
 
   const userSlots = filtered.filter((g) => !g.isRemainMode).length;
   if (userSlots >= maxGroupCount - 1) {
@@ -1756,6 +1822,197 @@ async function applyMinSoc() {
   const r = await api('/api/fox/op/v0/device/setting/set', { key: 'MinSocOnGrid', value: String(v) });
   if (r.errno === 0) log(`Min SoC on grid set to ${v}% ✓`, 'ok');
   else log('setting/set MinSocOnGrid failed: ' + (r.msg || JSON.stringify(r)) + ' (firmware may use different key)', 'err');
+}
+
+// ---------- Saved Schedules ----------
+// Persistent slots stored in config.json (config.schedulerPresets[]).  Each
+// preset has: id, label, workMode, startHour/Minute, endHour/Minute, fdPwr,
+// fdSoc, minSocOnGrid, maxSoc, enabled.  "Sync to inverter" merges enabled
+// presets into the Fox scheduler, preserving any other manual slots.
+let savedPresets = [];
+let _savedEditingId = null;
+
+async function loadSavedPresets() {
+  if (!adminPw) { renderSavedPresets(); return; }
+  try {
+    const r = await fetch('/api/saved-schedules', { headers: { 'X-Admin-Password': adminPw } });
+    if (!r.ok) { savedPresets = []; renderSavedPresets(); return; }
+    const j = await r.json();
+    savedPresets = Array.isArray(j.presets) ? j.presets : [];
+  } catch { savedPresets = []; }
+  renderSavedPresets();
+}
+
+async function persistSavedPresets() {
+  if (!adminPw) { openUnlockPrompt(); return false; }
+  const r = await fetch('/api/saved-schedules', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Admin-Password': adminPw },
+    body: JSON.stringify({ presets: savedPresets }),
+  });
+  if (r.status === 401) { openUnlockPrompt(); return false; }
+  if (!r.ok) { log('Save presets failed: ' + r.status, 'err'); return false; }
+  return true;
+}
+
+function fmtPresetWindow(p) {
+  return `${pad2(p.startHour)}:${pad2(p.startMinute)}–${pad2(p.endHour)}:${pad2(p.endMinute)}`;
+}
+
+function renderSavedPresets() {
+  const tbl = $('savedTable');
+  if (!tbl) return;
+  if (!adminPw) {
+    tbl.innerHTML = '<tbody><tr><td style="padding:10px;color:var(--muted)">Unlock to view and manage saved schedules.</td></tr></tbody>';
+    return;
+  }
+  if (!savedPresets.length) {
+    tbl.innerHTML = '<tbody><tr><td style="padding:10px;color:var(--muted)">No saved schedules yet. Click <b>+ Add</b> to create one (e.g. evening peak dump).</td></tr></tbody>';
+    return;
+  }
+  let html = '<thead><tr><th style="width:50px">On</th><th>Label</th><th>Mode</th><th>Window</th><th>Rate</th><th>fdSoC</th><th style="width:60px"></th></tr></thead><tbody>';
+  for (const p of savedPresets) {
+    const checked = p.enabled ? 'checked' : '';
+    html += `<tr data-id="${p.id}">
+      <td><input type="checkbox" class="saved-toggle" ${checked} /></td>
+      <td>${escapeHtml(p.label || '(unnamed)')}</td>
+      <td>${p.workMode}</td>
+      <td>${fmtPresetWindow(p)}</td>
+      <td>${((p.fdPwr || 0) / 1000).toFixed(1)}kW</td>
+      <td>${p.fdSoc}%</td>
+      <td><button class="saved-edit">Edit</button></td>
+    </tr>`;
+  }
+  html += '</tbody>';
+  tbl.innerHTML = html;
+  // Wire up toggles + edits
+  tbl.querySelectorAll('.saved-toggle').forEach((cb) => {
+    cb.addEventListener('change', async (e) => {
+      const id = e.target.closest('tr').dataset.id;
+      const p  = savedPresets.find((x) => x.id === id);
+      if (!p) return;
+      p.enabled = e.target.checked;
+      if (!(await persistSavedPresets())) { p.enabled = !p.enabled; renderSavedPresets(); }
+    });
+  });
+  tbl.querySelectorAll('.saved-edit').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      const id = e.target.closest('tr').dataset.id;
+      openSavedEditModal(id);
+    });
+  });
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function openSavedEditModal(id) {
+  const isNew = !id;
+  _savedEditingId = id;
+  const p = isNew ? {
+    id: 'preset-' + Date.now(),
+    label: '',
+    workMode: 'ForceDischarge',
+    startHour: 17, startMinute: 30, endHour: 19, endMinute: 30,
+    fdPwr: 10500, fdSoc: 20, minSocOnGrid: 10, maxSoc: 100,
+    enabled: true,
+  } : savedPresets.find((x) => x.id === id);
+  if (!p) return;
+  $('savedEditTitle').textContent = isNew ? 'Add saved schedule' : 'Edit saved schedule';
+  $('savedEditDelete').style.display = isNew ? 'none' : '';
+  $('se_label').value = p.label || '';
+  $('se_workMode').value = p.workMode;
+  $('se_start').value = `${pad2(p.startHour)}:${pad2(p.startMinute)}`;
+  $('se_end').value = `${pad2(p.endHour)}:${pad2(p.endMinute)}`;
+  $('se_rateKw').value = ((p.fdPwr || 0) / 1000).toFixed(1);
+  $('se_fdSoc').value = p.fdSoc;
+  $('se_minSocOnGrid').value = p.minSocOnGrid;
+  $('se_maxSoc').value = p.maxSoc;
+  $('savedEditErr').textContent = '';
+  $('savedEditBackdrop').classList.add('show');
+}
+
+function closeSavedEditModal() { $('savedEditBackdrop').classList.remove('show'); }
+
+async function saveSavedEditModal() {
+  const id = _savedEditingId;
+  const isNew = !savedPresets.find((x) => x.id === id);
+  const [sh, sm] = ($('se_start').value || '0:0').split(':').map(Number);
+  const [eh, em] = ($('se_end').value   || '0:0').split(':').map(Number);
+  const preset = {
+    id: id || ('preset-' + Date.now()),
+    label: $('se_label').value.trim() || '(unnamed)',
+    workMode: $('se_workMode').value,
+    startHour: sh|0, startMinute: sm|0,
+    endHour: eh|0, endMinute: em|0,
+    fdPwr: Math.round(Number($('se_rateKw').value) * 1000),
+    fdSoc: Number($('se_fdSoc').value),
+    minSocOnGrid: Number($('se_minSocOnGrid').value),
+    maxSoc: Number($('se_maxSoc').value),
+    enabled: true,
+  };
+  // Validation
+  if (preset.startHour === preset.endHour && preset.startMinute === preset.endMinute) {
+    $('savedEditErr').textContent = 'Start and end can\'t be identical.'; return;
+  }
+  if (preset.fdPwr < 0 || preset.fdPwr > 20000) {
+    $('savedEditErr').textContent = 'Rate out of range.'; return;
+  }
+  if (isNew) {
+    savedPresets.push(preset);
+  } else {
+    const existing = savedPresets.find((x) => x.id === id);
+    preset.enabled = existing.enabled;
+    Object.assign(existing, preset);
+  }
+  if (await persistSavedPresets()) { closeSavedEditModal(); renderSavedPresets(); }
+}
+
+async function deleteSavedEditModal() {
+  const id = _savedEditingId;
+  if (!id) return;
+  savedPresets = savedPresets.filter((x) => x.id !== id);
+  if (await persistSavedPresets()) { closeSavedEditModal(); renderSavedPresets(); }
+}
+
+// Sync enabled presets to the Fox scheduler. Existing slots that match
+// (workMode + same window) are replaced. Other manual slots are left alone.
+async function applyPresetsToInverter() {
+  if (!adminPw) { openUnlockPrompt(); return; }
+  const enabled = savedPresets.filter((p) => p.enabled);
+  if (!enabled.length) { log('No enabled saved schedules to sync.', 'err'); return; }
+  const { maxGroupCount, groups } = await readScheduler();
+  // Remove existing slots that match a preset's window+mode (replace, don't dup)
+  const presetMatches = (g) => enabled.some((p) =>
+    g.workMode === p.workMode
+    && g.startHour === p.startHour && g.startMinute === p.startMinute
+    && g.endHour   === p.endHour   && g.endMinute   === p.endMinute
+  );
+  let next = groups.filter((g) => !presetMatches(g));
+  // Add enabled presets
+  for (const p of enabled) {
+    next.push({
+      enable: 1,
+      startHour: p.startHour, startMinute: p.startMinute,
+      endHour:   p.endHour,   endMinute:   p.endMinute,
+      workMode:  p.workMode,
+      fdSoc: p.fdSoc, fdPwr: p.fdPwr,
+      minSocOnGrid: p.minSocOnGrid, maxSoc: p.maxSoc,
+    });
+  }
+  if (next.filter((g) => !g.isRemainMode).length > maxGroupCount) {
+    log(`Too many slots (${next.length} > max ${maxGroupCount}). Remove some or disable presets.`, 'err');
+    return;
+  }
+  log(`Syncing ${enabled.length} saved schedule(s) to inverter…`);
+  const r = await writeScheduler(next);
+  if (r.errno === 0) {
+    log(`Synced ${enabled.length} saved schedule(s) ✓`, 'ok');
+    setTimeout(refreshSchedulerPanel, 1200);
+  } else {
+    log('Sync failed: ' + (r.msg || JSON.stringify(r)), 'err');
+  }
 }
 
 async function diagnose() {
@@ -1863,6 +2120,21 @@ $('applyMinSoc').addEventListener('click', () => applyMinSoc().catch((e) => log(
 $('diagnoseBtn').addEventListener('click', () => diagnose().catch((e) => log(e.message, 'err')));
 $('refreshSched').addEventListener('click', () => refreshSchedulerPanel());
 $('refresh').addEventListener('click', () => { refreshAll(); refreshSchedulerPanel(); });
+
+// --- Saved schedules ---
+$('savedAddBtn').addEventListener('click', () => {
+  if (!adminPw) { openUnlockPrompt(); return; }
+  openSavedEditModal(null);
+});
+$('savedApplyBtn').addEventListener('click', () => applyPresetsToInverter().catch((e) => log(e.message, 'err')));
+$('savedEditCancel').addEventListener('click', closeSavedEditModal);
+$('savedEditSave').addEventListener('click', () => saveSavedEditModal().catch((e) => log(e.message, 'err')));
+$('savedEditDelete').addEventListener('click', () => {
+  if (confirm('Delete this saved schedule?')) deleteSavedEditModal().catch((e) => log(e.message, 'err'));
+});
+$('savedEditBackdrop').addEventListener('click', (e) => {
+  if (e.target.id === 'savedEditBackdrop') closeSavedEditModal();
+});
 
 // Chart hover tooltips (price + solar)
 function wireTooltip(chartId, tooltipId, renderFn) {
@@ -2158,6 +2430,7 @@ $('recRefresh').addEventListener('click', () => loadRecommendation().catch((e) =
   // shows fresh numbers without the user having to press the button.
   refreshAll().catch(() => {});
   refreshSchedulerPanel().catch(() => {});
+  loadSavedPresets().catch(() => {});
 
   // ---------- End-of-day SoC ----------
   async function loadSocHistory() {
@@ -2439,6 +2712,8 @@ $('recRefresh').addEventListener('click', () => loadRecommendation().catch((e) =
     } else {
       try { await loadSettings(); } catch (e) { errEl.textContent = e.message; }
     }
+    // Reload saved presets now that we have admin auth.
+    loadSavedPresets().catch(() => {});
   });
   $('adminPw').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('authOk').click(); });
   $('settingsSave').addEventListener('click', saveSettings);

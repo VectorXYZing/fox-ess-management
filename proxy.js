@@ -162,6 +162,25 @@ const server = http.createServer(async (req, res) => {
       return send(res, ok ? 200 : 401, JSON.stringify({ ok }));
     }
 
+    // --- Saved schedule presets (admin-only) --------------------------------
+    if (req.url === '/api/saved-schedules' && req.method === 'GET') {
+      if (!auth.checkAdmin(req)) return send(res, 401, JSON.stringify({ error: 'admin required' }));
+      return send(res, 200, JSON.stringify({ presets: config.schedulerPresets || [] }));
+    }
+    if (req.url === '/api/saved-schedules' && req.method === 'POST') {
+      if (!auth.checkAdmin(req)) return send(res, 401, JSON.stringify({ error: 'admin required' }));
+      const raw = await readBody(req);
+      let incoming;
+      try { incoming = JSON.parse(raw); }
+      catch { return send(res, 400, JSON.stringify({ error: 'invalid JSON' })); }
+      if (!Array.isArray(incoming.presets)) {
+        return send(res, 400, JSON.stringify({ error: 'presets must be an array' }));
+      }
+      try { saveConfig({ schedulerPresets: incoming.presets }); }
+      catch (e) { return send(res, 500, JSON.stringify({ error: 'save failed: ' + e.message })); }
+      return send(res, 200, JSON.stringify({ ok: true, presets: config.schedulerPresets }));
+    }
+
     // --- Push notification test (admin-only) --------------------------------
     if (req.url === '/api/notify/test' && req.method === 'POST') {
       if (!auth.checkAdmin(req)) return send(res, 401, JSON.stringify({ error: 'admin required' }));

@@ -35,6 +35,21 @@
     "safetyMarginPct": 10
   },
 
+  "schedulerPresets": [
+    {
+      "id": "evening-dump",
+      "label": "Evening peak dump",
+      "workMode": "ForceDischarge",
+      "startHour": 17, "startMinute": 30,
+      "endHour": 19, "endMinute": 30,
+      "fdPwr": 10500,
+      "fdSoc": 20,
+      "minSocOnGrid": 10,
+      "maxSoc": 100,
+      "enabled": true
+    }
+  ],
+
   "flowPowerMarkup": {
     "lossFactor": 1.0,
     "gstRate": 0.1,
