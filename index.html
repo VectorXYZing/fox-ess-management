@@ -806,6 +806,10 @@
 </div>
 
 <script>
+// Shared global — must live outside any IIFE so both the top-level
+// saved-schedules code and the settings IIFE can read/write it.
+let adminPw = sessionStorage.getItem('adminPw') || '';
+
 // ---------- tiny helpers ----------
 const $ = (id) => document.getElementById(id);
 const fmtKw = (w) => (w == null ? '—' : (w >= 0 ? '+' : '') + (w / 1).toFixed(2) + ' kW');
@@ -2801,7 +2805,10 @@ $('recRefresh').addEventListener('click', () => loadRecommendation().catch((e) =
   const errEl = $('settingsErr');
   const okEl = $('settingsOk');
   const subEl = $('settingsSub');
-  let adminPw = sessionStorage.getItem('adminPw') || '';
+  // adminPw is declared globally at the top of the script so saved-schedules
+  // code outside this IIFE can read it. Sync once at IIFE start in case
+  // anything was written via sessionStorage between page load and now.
+  adminPw = sessionStorage.getItem('adminPw') || '';
   let unlockMode = 'settings'; // 'settings' or 'unlock'
 
   function applyLockState(unlocked) {
